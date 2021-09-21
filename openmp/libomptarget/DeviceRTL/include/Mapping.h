@@ -25,13 +25,16 @@ inline constexpr uint32_t MaxThreadsPerTeam = 1024;
 #pragma omp end declare target
 
 /// Initialize the mapping machinery.
-void init(bool IsSPMD);
+void init(int Mode);
 
 /// Return true if the kernel is executed in SPMD mode.
 bool isSPMDMode();
 
 /// Return true if the kernel is executed in generic mode.
 bool isGenericMode();
+
+/// Return true if the kernel is executed in SIMD mode.
+bool isSIMDMode();
 
 /// Return true if the executing thread is the main thread in generic mode.
 bool isMainThreadInGenericMode();
@@ -54,6 +57,12 @@ uint32_t getThreadIdInWarp();
 
 /// Return the thread Id in the block, in [0, getBlockSize()).
 uint32_t getThreadIdInBlock();
+
+/// Return the logic thread Id, which depends on how we map an OpenMP thread to
+/// the target device. In non-SIMD mode, we map an OpenMP thread to a device
+/// thread. In SIMD mode, we map an OpenMP thread to a warp, and each thread in
+/// the warp is a SIMD lane.
+uint32_t getLogicThreadId();
 
 /// Return the warp id in the block.
 uint32_t getWarpId();
@@ -78,6 +87,17 @@ uint32_t getKernelSize();
 
 /// Return the number of processing elements on the device.
 uint32_t getNumberOfProcessorElements();
+
+namespace utils {
+/// Return true if \p Mode indicates SPMD mode.
+inline bool isSPMDMode(int Mode) { return Mode & 0x1; }
+
+/// Return true if \p Mode indicates generic mode.
+inline bool isGenericMode(int Mode) { return !isSPMDMode(Mode); }
+
+/// Return true if \p Mode indicates SIMD mode.
+inline bool isSIMDMode(int Mode) { return Mode & 0x2; }
+} // namespace utils
 
 } // namespace mapping
 

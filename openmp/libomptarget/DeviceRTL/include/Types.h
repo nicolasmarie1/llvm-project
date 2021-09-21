@@ -150,6 +150,8 @@ using __kmpc_impl_lanemask_t = LaneMaskTy;
 
 using ParallelRegionFnTy = void *;
 
+using SIMDRegionFnTy = void *;
+
 using CriticalNameTy = int32_t[8];
 
 struct omp_lock_t {

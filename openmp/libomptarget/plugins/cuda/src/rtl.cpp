@@ -1099,13 +1099,22 @@ public:
     KernelTy *KernelInfo = reinterpret_cast<KernelTy *>(TgtEntryPtr);
 
     int CudaThreadsPerBlock;
+    // TODO: Set this mode accordingly.
+    bool IsSIMDMode = false;
     if (ThreadLimit > 0) {
-      DP("Setting CUDA threads per block to requested %d\n", ThreadLimit);
-      CudaThreadsPerBlock = ThreadLimit;
-      // Add master warp if necessary
-      if (KernelInfo->ExecutionMode == GENERIC) {
-        DP("Adding master warp: +%d threads\n", DeviceData[DeviceId].WarpSize);
-        CudaThreadsPerBlock += DeviceData[DeviceId].WarpSize;
+      if (IsSIMDMode) {
+        DP("Setting CUDA threads per block to requested %d\n",
+           ThreadLimit * DeviceData[DeviceId].WarpSize);
+        CudaThreadsPerBlock = ThreadLimit * DeviceData[DeviceId].WarpSize;
+      } else {
+        DP("Setting CUDA threads per block to requested %d\n", ThreadLimit);
+        CudaThreadsPerBlock = ThreadLimit;
+        // Add master warp if necessary
+        if (KernelInfo->ExecutionMode == GENERIC) {
+          DP("Adding master warp: +%d threads\n",
+             DeviceData[DeviceId].WarpSize);
+          CudaThreadsPerBlock += DeviceData[DeviceId].WarpSize;
+        }
       }
     } else {
       DP("Setting CUDA threads per block to default %d\n",

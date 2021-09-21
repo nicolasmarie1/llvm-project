@@ -210,7 +210,7 @@ template <typename T, typename ST> struct omptarget_nvptx_LoopSupport {
   static void dispatch_init(IdentTy *loc, int32_t threadId,
                             kmp_sched_t schedule, T lb, T ub, ST st, ST chunk,
                             DynamicScheduleTracker *DST) {
-    int tid = mapping::getThreadIdInBlock();
+    int tid = mapping::getLogicThreadId();
     T tnum = omp_get_num_threads();
     T tripCount = ub - lb + 1; // +1 because ub is inclusive
     ASSERT0(LT_FUSSY, threadId < tnum,

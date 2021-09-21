@@ -49,18 +49,41 @@ namespace {
 uint32_t determineNumberOfThreads(int32_t NumThreadsClause) {
   uint32_t NThreadsICV =
       NumThreadsClause != -1 ? NumThreadsClause : icv::NThreads;
-  uint32_t NumThreads = mapping::getBlockSize();
+
+  const bool IsSIMDMode = mapping::isSIMDMode();
+
+  uint32_t NumThreads =
+      IsSIMDMode ? mapping::getNumberOfWarpsInBlock() : mapping::getBlockSize();
 
   if (NThreadsICV != 0 && NThreadsICV < NumThreads)
     NumThreads = NThreadsICV;
 
   // Round down to a multiple of WARPSIZE since it is legal to do so in OpenMP.
-  if (NumThreads < mapping::getWarpSize())
-    NumThreads = 1;
-  else
-    NumThreads = (NumThreads & ~((uint32_t)mapping::getWarpSize() - 1));
+  // We don't need this for SIMD mode because an OpenMP thread is mapped to a
+  // warp on the device and it can be any number.
+  if (!IsSIMDMode) {
+    if (NumThreads < mapping::getWarpSize())
+      NumThreads = 1;
+    else
+      NumThreads = (NumThreads & ~((uint32_t)mapping::getWarpSize() - 1));
+  }
 
   return NumThreads;
+}
+
+uint32_t determineSIMDLen(int32_t SIMDLen, int32_t SafeLen) {
+  ASSERT(mapping::isSIMDMode());
+
+  // TODO: This is probably not right if the schedule is different.
+  if (SafeLen < SIMDLen)
+    SIMDLen = SafeLen;
+
+  // We currently maps an OpenMP thread to a warp in SIMD mode. If the simdlen
+  // is larger than the warp size, we have to ceil it.
+  if (SIMDLen > mapping::getWarpSize())
+    SIMDLen = mapping::getWarpSize();
+
+  return SIMDLen;
 }
 
 // Invoke an outlined parallel function unwrapping arguments (up to 32).
@@ -78,11 +101,57 @@ void invokeMicrotask(int32_t global_tid, int32_t bound_tid, void *fn,
 
 extern "C" {
 
+void __kmpc_simd_51(IdentTy *ident, int32_t, int32_t if_expr, int32_t safelen,
+                    int32_t simdlen, int order, void *fn, void *wrapper_fn,
+                    void **args, int64_t nargs) {
+  // Handle non-SIMD case first, which can be:
+  // - if clause is evaluted to false
+  // - simdlen is set to 1
+  // - it is already in simd region
+  const uint32_t LogicThreadId = mapping::getLogicThreadId();
+  if (OMP_UNLIKELY(!if_expr || simdlen == 1 || safelen == 1 ||
+                   icv::SIMDLevel)) {
+    invokeMicrotask(LogicThreadId, 0, fn, args, nargs);
+    return;
+  }
+
+  // Only the leader of each warp can execute the following code.
+  ASSERT(mapping::isLeaderInWarp());
+
+  const uint32_t SIMDLen = determineSIMDLen(simdlen, safelen);
+
+  if (LogicThreadId == 0)
+    state::SIMDLaneWidth = SIMDLen;
+
+  // Propagates the thread state to all SIMD workers from the leader.
+  state::propagateThreadState(SIMDLen);
+
+  // Synchronize all threads (leaders).
+  synchronize::threads();
+
+  {
+    state::ValueRAII SIMDRegionFnRAII(state::SIMDRegionFn, wrapper_fn,
+                                      (void *)nullptr, true);
+    state::ValueRAII SIMDLevelRAII(icv::SIMDLevel, 1u, 0u, true);
+
+    // Signal SIMD workers
+    synchronize::warp(mapping::activemask());
+
+    // TODO: Leader in warp also has to execute the SIMD region.
+    // What we need:
+    // - A work-sharing function that can take both thread id and lane id into
+    // consideration.
+
+    // Synchronize after execution of the SIMD region.
+    synchronize::warp(mapping::activemask());
+  }
+}
+
 void __kmpc_parallel_51(IdentTy *ident, int32_t, int32_t if_expr,
                         int32_t num_threads, int proc_bind, void *fn,
                         void *wrapper_fn, void **args, int64_t nargs) {
 
-  uint32_t TId = mapping::getThreadIdInBlock();
+  uint32_t TId = mapping::getLogicThreadId();
   // Handle the serialized case first, same for SPMD/non-SPMD.
   if (OMP_UNLIKELY(!if_expr || icv::Level)) {
     __kmpc_serialized_parallel(ident, TId);
@@ -156,7 +225,7 @@ __kmpc_kernel_parallel(ParallelRegionFnTy *WorkFn) {
     return false;
 
   // Set to true for workers participating in the parallel region.
-  uint32_t TId = mapping::getThreadIdInBlock();
+  uint32_t TId = mapping::getLogicThreadId();
   bool ThreadIsActive = TId < state::ParallelTeamSize;
   return ThreadIsActive;
 }
@@ -168,6 +237,25 @@ __attribute__((noinline)) void __kmpc_kernel_end_parallel() {
   uint32_t TId = mapping::getThreadIdInBlock();
   state::resetStateForThread(TId);
   ASSERT(!mapping::isSPMDMode());
+}
+
+__attribute__((noinline)) bool
+__kmpc_kernel_simd(SIMDRegionFnTy *WorkFn) {
+  // Work function and arguments for L1 SIMD region.
+  *WorkFn = state::SIMDRegionFn;
+
+  // If this is the termination signal from the master, quit early.
+  if (!*WorkFn)
+    return false;
+
+  // Set to true for workers participating in the parallel region.
+  uint32_t LaneId = mapping::getThreadIdInWarp();
+  bool LaneActive = LaneId < state::SIMDLaneWidth;
+  return LaneActive;
+}
+
+__attribute__((noinline)) void __kmpc_kernel_end_simd() {
+  // TODO: Some clean-up of SIMD execution
 }
 
 void __kmpc_serialized_parallel(IdentTy *, uint32_t TId) {

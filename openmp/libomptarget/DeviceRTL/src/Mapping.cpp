@@ -178,7 +178,7 @@ bool mapping::isMainThreadInGenericMode() {
 bool mapping::isLeaderInWarp() {
   __kmpc_impl_lanemask_t Active = mapping::activemask();
   __kmpc_impl_lanemask_t LaneMaskLT = mapping::lanemaskLT();
-  return utils::popc(Active & LaneMaskLT) == 0;
+  return ::_OMP::utils::popc(Active & LaneMaskLT) == 0;
 }
 
 LaneMaskTy mapping::activemask() { return impl::activemask(); }
@@ -190,6 +190,13 @@ LaneMaskTy mapping::lanemaskGT() { return impl::lanemaskGT(); }
 uint32_t mapping::getThreadIdInWarp() { return impl::getThreadIdInWarp(); }
 
 uint32_t mapping::getThreadIdInBlock() { return impl::getThreadIdInBlock(); }
+
+uint32_t mapping::getLogicThreadId() {
+  if (mapping::isSIMDMode())
+    return mapping::getWarpId();
+
+  return mapping::getThreadIdInBlock();
+}
 
 uint32_t mapping::getBlockSize() { return impl::getBlockSize(); }
 
@@ -214,16 +221,20 @@ uint32_t mapping::getNumberOfWarpsInBlock() {
 /// Execution mode
 ///
 ///{
-static int SHARED(IsSPMDMode);
+static int SHARED(ExecutionMode);
 
-void mapping::init(bool IsSPMD) {
+void mapping::init(int Mode) {
   if (!mapping::getThreadIdInBlock())
-    IsSPMDMode = IsSPMD;
+    ExecutionMode = Mode;
 }
 
-bool mapping::isSPMDMode() { return IsSPMDMode; }
+bool mapping::isSPMDMode() { return mapping::utils::isSPMDMode(ExecutionMode); }
 
-bool mapping::isGenericMode() { return !isSPMDMode(); }
+bool mapping::isGenericMode() {
+  return mapping::utils::isGenericMode(ExecutionMode);
+}
+
+bool mapping::isSIMDMode() { return mapping::utils::isSIMDMode(ExecutionMode); }
 ///}
 
 extern "C" {

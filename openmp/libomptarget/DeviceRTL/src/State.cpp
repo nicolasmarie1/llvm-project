@@ -203,7 +203,7 @@ void ICVStateTy::assertEqual(const ICVStateTy &Other) const {
 
 struct TeamStateTy {
   /// TODO: provide a proper init function.
-  void init(bool IsSPMD);
+  void init(int Mode);
 
   bool operator==(const TeamStateTy &) const;
 
@@ -224,8 +224,13 @@ struct TeamStateTy {
 
 TeamStateTy SHARED(TeamState);
 
-void TeamStateTy::init(bool IsSPMD) {
-  ICVState.NThreadsVar = mapping::getBlockSize();
+void TeamStateTy::init(int Mode) {
+  // In SIMD mode, we map an OpenMP thread to a warp.
+  if (mapping::utils::isSIMDMode(Mode))
+    ICVState.NThreadsVar = mapping::getNumberOfWarpsInBlock();
+  else
+    ICVState.NThreadsVar = mapping::getBlockSize();
+
   ICVState.LevelVar = 0;
   ICVState.ActiveLevelVar = 0;
   ICVState.MaxActiveLevelsVar = 1;
@@ -357,7 +362,8 @@ void *&state::lookupPtr(ValueKind Kind, bool IsReadonly) {
   __builtin_unreachable();
 }
 
-void state::init(bool IsSPMD) {
+void state::init(int Mode) {
+  const bool IsSPMD = mapping::utils::isSPMDMode(Mode);
   SharedMemorySmartStack.init(IsSPMD);
   if (!mapping::getThreadIdInBlock())
     TeamState.init(IsSPMD);
@@ -404,6 +410,15 @@ void state::assumeInitialState(bool IsSPMD) {
   ASSERT(mapping::isSPMDMode() == IsSPMD);
 }
 
+void state::propagateThreadState(unsigned SIMDLen) {
+  ASSERT(mapping::isSIMDMode());
+  ASSERT(mapping::isLeaderInWarp());
+
+  const uint32_t TId = mapping::getThreadIdInBlock();
+  for (int I = 1; I < SIMDLen; ++I)
+    ThreadStates[I + TId] = ThreadStates[TId];
+}
+
 extern "C" {
 void omp_set_dynamic(int V) {}
 
@@ -434,7 +449,7 @@ void omp_set_schedule(omp_sched_t ScheduleKind, int ChunkSize) {
 }
 
 int omp_get_ancestor_thread_num(int Level) {
-  return returnValIfLevelIsActive(Level, mapping::getThreadIdInBlock(), 0);
+  return returnValIfLevelIsActive(Level, mapping::getLogicThreadId(), 0);
 }
 
 int omp_get_thread_num(void) {

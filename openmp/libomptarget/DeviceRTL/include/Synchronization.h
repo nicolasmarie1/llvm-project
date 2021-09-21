@@ -19,7 +19,7 @@ namespace _OMP {
 namespace synchronize {
 
 /// Initialize the synchronization machinery. Must be called by all threads.
-void init(bool IsSPMD);
+void init(int Mode);
 
 /// Synchronize all threads in a warp identified by \p Mask.
 void warp(LaneMaskTy Mask);

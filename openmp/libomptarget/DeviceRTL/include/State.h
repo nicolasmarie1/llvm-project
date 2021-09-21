@@ -24,7 +24,7 @@ namespace state {
 inline constexpr uint32_t SharedScratchpadSize = SHARED_SCRATCHPAD_SIZE;
 
 /// Initialize the state machinery. Must be called by all threads.
-void init(bool IsSPMD);
+void init(int Mode);
 
 /// TODO
 enum ValueKind {
@@ -37,6 +37,10 @@ enum ValueKind {
   VK_RunSchedChunk,
   VK_ParallelRegionFn,
   VK_ParallelTeamSize,
+  // SIMD
+  VK_SIMDLevel,
+  VK_SIMDRegionFn,
+  VK_SIMDLaneWidth,
 };
 
 /// TODO
@@ -145,9 +149,19 @@ inline state::Value<uint32_t, state::VK_ParallelTeamSize> ParallelTeamSize;
 inline state::PtrValue<ParallelRegionFnTy, state::VK_ParallelRegionFn>
     ParallelRegionFn;
 
+/// TODO
+inline state::Value<uint32_t, state::VK_SIMDLaneWidth> SIMDLaneWidth;
+
+/// TODO
+inline state::PtrValue<SIMDRegionFnTy, state::VK_SIMDRegionFn> SIMDRegionFn;
+
 void runAndCheckState(void(Func(void)));
 
 void assumeInitialState(bool IsSPMD);
+
+/// Propagate the thread state from the leader in the warp to the rest of SIMD
+/// workers. This function should only be called in SIMD mode.
+void propagateThreadState(unsigned SIMDLen);
 
 } // namespace state
 
@@ -170,6 +184,9 @@ inline state::Value<uint32_t, state::VK_MaxActiveLevels> MaxActiveLevels;
 
 /// TODO
 inline state::Value<uint32_t, state::VK_RunSched> RunSched;
+
+/// TODO
+inline state::Value<uint32_t, state::VK_SIMDLevel> SIMDLevel;
 
 } // namespace icv
 

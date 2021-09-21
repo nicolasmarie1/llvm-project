@@ -214,8 +214,8 @@ void setLock(omp_lock_t *Lock) {
 
 } // namespace impl
 
-void synchronize::init(bool IsSPMD) {
-  if (!IsSPMD)
+void synchronize::init(int Mode) {
+  if (!mapping::utils::isSPMDMode(Mode) || mapping::utils::isSIMDMode(Mode))
     impl::namedBarrierInit();
 }
 

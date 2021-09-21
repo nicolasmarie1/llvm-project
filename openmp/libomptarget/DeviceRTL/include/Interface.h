@@ -206,10 +206,10 @@ uint32_t __kmpc_get_hardware_thread_id_in_block();
 ///{
 int8_t __kmpc_is_spmd_exec_mode();
 
-int32_t __kmpc_target_init(IdentTy *Ident, bool IsSPMD,
+int32_t __kmpc_target_init(IdentTy *Ident, int Mode,
                            bool UseGenericStateMachine, bool);
 
-void __kmpc_target_deinit(IdentTy *Ident, bool IsSPMD, bool);
+void __kmpc_target_deinit(IdentTy *Ident, int Mode, bool);
 
 ///}
 
@@ -280,6 +280,12 @@ void __kmpc_serialized_parallel(IdentTy *Loc, uint32_t);
 
 /// TODO
 void __kmpc_end_serialized_parallel(IdentTy *Loc, uint32_t);
+
+/// TODO
+bool __kmpc_kernel_simd(SIMDRegionFnTy *WorkFn);
+
+/// TODO
+void __kmpc_kernel_end_simd();
 
 /// TODO
 void __kmpc_push_proc_bind(IdentTy *Loc, uint32_t TId, int ProcBind);
