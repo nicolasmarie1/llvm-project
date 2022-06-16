@@ -163,6 +163,11 @@ Pass *createArgumentPromotionPass(unsigned maxElements = 3);
 Pass *createOpenMPOptCGSCCLegacyPass();
 
 //===----------------------------------------------------------------------===//
+/// createCommunicationOptCGSCCLegacyPass - Communication code motion
+/// optimizations.
+Pass *createCommunicationOptCGSCCLegacyPass();
+
+//===----------------------------------------------------------------------===//
 /// createIPSCCPPass - This pass propagates constants from call sites into the
 /// bodies of functions, and keeps track of whether basic blocks are executable
 /// in the process.
