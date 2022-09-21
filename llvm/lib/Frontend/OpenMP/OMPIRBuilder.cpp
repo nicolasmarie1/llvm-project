@@ -37,6 +37,7 @@
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/CodeExtractor.h"
 #include "llvm/Transforms/Utils/LoopPeel.h"
+#include "llvm/Transforms/Utils/ModuleUtils.h"
 #include "llvm/Transforms/Utils/UnrollLoop.h"
 
 #include <cstdint>
@@ -3762,6 +3763,56 @@ CallInst *OpenMPIRBuilder::createCachedThreadPrivate(
       getOrCreateRuntimeFunctionPtr(OMPRTL___kmpc_threadprivate_cached);
 
   return Builder.CreateCall(Fn, Args);
+}
+
+Function *OpenMPIRBuilder::createTargetEntry(FunctionType *Ty,
+                                             StringRef EntryName) {
+  assert(M.getFunction(EntryName) == nullptr && "kernel entry already exists");
+
+  LLVMContext &Ctx = M.getContext();
+
+  Function *F =
+      Function::Create(Ty, llvm::GlobalValue::WeakODRLinkage, EntryName, M);
+
+  F->setVisibility(GlobalValue::DefaultVisibility);
+  F->setDSOLocal(false);
+  {
+    Triple T(M.getTargetTriple());
+    if (T.isAMDGCN())
+      F->setCallingConv(CallingConv::AMDGPU_KERNEL);
+  }
+
+  // Get "nvvm.annotations" metadata node.
+  NamedMDNode *MD = M.getOrInsertNamedMetadata("nvvm.annotations");
+
+  Metadata *MDVals[] = {
+      ConstantAsMetadata::get(F), MDString::get(Ctx, "kernel"),
+      ConstantAsMetadata::get(ConstantInt::get(Type::getInt32Ty(Ctx), 1))};
+  // Append metadata to nvvm.annotations.
+  MD->addOperand(MDNode::get(Ctx, MDVals));
+
+  // Add a function attribute for the kernel.
+  F->addFnAttr(Attribute::get(Ctx, "kernel"));
+
+  return F;
+}
+
+Function *OpenMPIRBuilder::createTargetEntry(FunctionType *Ty,
+                                             StringRef EntryName, bool IsSPMD) {
+  LLVMContext &Ctx = M.getContext();
+
+  Function *F = createTargetEntry(Ty, EntryName);
+
+  // exec mode global variable
+  GlobalVariable *ModeGV = new GlobalVariable(
+      M, Type::getInt8Ty(Ctx), /*isConstant=*/true, GlobalValue::WeakAnyLinkage,
+      ConstantInt::get(Type::getInt8Ty(Ctx), IsSPMD
+                                                 ? OMP_TGT_EXEC_MODE_SPMD
+                                                 : OMP_TGT_EXEC_MODE_GENERIC),
+      EntryName + "_exec_mode");
+  appendToCompilerUsed(M, {ModeGV});
+
+  return F;
 }
 
 OpenMPIRBuilder::InsertPointTy

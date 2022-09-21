@@ -1224,6 +1224,15 @@ public:
   ///
   ///{
 
+  /// Create a kernel entry function.
+  ///
+  /// \param Ty The type of the kernel entry function.
+  /// \param EntryName The name of the kernel entry function.
+  /// \param IsSPMD Flag to indicate if the kernel is an SPMD kernel or not.
+  Function *createTargetEntry(FunctionType *Ty, StringRef EntryName);
+  Function *createTargetEntry(FunctionType *Ty, StringRef EntryName,
+                              bool IsSPMD);
+
   /// Create a runtime call for kmpc_target_init
   ///
   /// \param Loc The insert and source location description.
