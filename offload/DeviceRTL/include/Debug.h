@@ -39,6 +39,12 @@ void __assert_fail_internal(const char *expr, const char *msg, const char *file,
   __builtin_trap();                                                            \
   __builtin_unreachable();
 
+#define assert(expr)                                                           \
+  {                                                                            \
+    if (!(expr))                                                               \
+      __assert_fail(#expr, __FILE__, __LINE__, __PRETTY_FUNCTION__);           \
+  }
+
 ///}
 
 #define PRINTF(fmt, ...) (void)printf(fmt, ##__VA_ARGS__);

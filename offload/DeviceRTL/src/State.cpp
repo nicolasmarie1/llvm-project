@@ -17,6 +17,7 @@
 #include "LibC.h"
 #include "Mapping.h"
 #include "State.h"
+#include "Memory.h"
 #include "Synchronization.h"
 #include "Types.h"
 #include "Utils.h"
@@ -71,7 +72,7 @@ extern "C" {
 /// In fact, it is a separate stack *per warp*. That means, each warp must push
 /// and pop symmetrically or this breaks, badly. The implementation will (aim
 /// to) detect non-lock-step warps and fallback to malloc/free. The same will
-/// happen if a warp runs out of memory. The master warp in generic memory is
+/// happen if a woarp runs out of memory. The master warp in generic memory is
 /// special and is given more memory than the rest.
 ///
 struct SharedMemorySmartStackTy {
@@ -83,6 +84,7 @@ struct SharedMemorySmartStackTy {
   void *push(uint64_t Bytes);
 
   /// Deallocate the last allocation made by the encountering thread and pointed
+  //
   /// to by \p Ptr from the stack. Each thread can call this function.
   void pop(void *Ptr, uint32_t Bytes);
 
@@ -274,7 +276,8 @@ void state::enterDataEnvironment(IdentTy *Ident) {
   uintptr_t *ThreadStatesBitsPtr = reinterpret_cast<uintptr_t *>(&ThreadStates);
   if (!atomic::load(ThreadStatesBitsPtr, atomic::seq_cst)) {
     uint32_t Bytes =
-        sizeof(ThreadStates[0]) * mapping::getNumberOfThreadsInBlock();
+        sizeof(ThreadStates[0]) *
+        (mapping::getNumberOfThreadsInBlock() + (mapping::isSPMDMode() ? 0 : 1));
     void *ThreadStatesPtr =
         memory::allocGlobal(Bytes, "Thread state array allocation");
     memset(ThreadStatesPtr, 0, Bytes);
@@ -371,12 +374,26 @@ int omp_get_thread_num(void) {
   return omp_get_ancestor_thread_num(omp_get_level());
 }
 
+int omp_get_bulk_thread_num() {
+  ASSERT(mapping::isSPMDMode());
+  int BId = mapping::getBlockId();
+  int BSize = mapping::getBlockSize(/* IsSPMD */ true);
+  int TId = mapping::getThreadIdInBlock();
+  int Id = BId * BSize + TId;
+  return returnValIfLevelIsActive(omp_get_level(), Id, 0);
+}
+
 int omp_get_team_size(int Level) {
   return returnValIfLevelIsActive(Level, state::getEffectivePTeamSize(), 1);
 }
 
 int omp_get_num_threads(void) {
   return omp_get_level() != 1 ? 1 : state::getEffectivePTeamSize();
+}
+
+int omp_get_bulk_num_threads(void) {
+  ASSERT(mapping::isSPMDMode());
+  return mapping::getKernelSize();
 }
 
 int omp_get_thread_limit(void) { return mapping::getMaxTeamThreads(); }
