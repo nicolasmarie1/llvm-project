@@ -424,6 +424,10 @@ int __tgt_activate_record_replay(int64_t DeviceId, uint64_t MemorySize,
                                  void *VAddr, bool IsRecord, bool SaveOutput,
                                  uint64_t &ReqPtrArgOffset);
 
+// Host RPC support
+int64_t __kmpc_host_rpc_get_arg(void *Wrapper, int32_t ArgNo);
+void __kmpc_host_rpc_set_ret_val(void *Wrapper, int64_t RetVal);
+
 #ifdef __cplusplus
 }
 #endif

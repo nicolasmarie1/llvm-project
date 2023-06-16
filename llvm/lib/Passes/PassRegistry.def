@@ -47,6 +47,7 @@ MODULE_PASS("attributor", AttributorPass())
 MODULE_PASS("attributor-light", AttributorLightPass())
 MODULE_PASS("called-value-propagation", CalledValuePropagationPass())
 MODULE_PASS("canonicalize-aliases", CanonicalizeAliasesPass())
+MODULE_PASS("canonicalize-main-function", CanonicalizeMainFunctionPass())
 MODULE_PASS("check-debugify", NewPMCheckDebugifyPass())
 MODULE_PASS("constmerge", ConstantMergePass())
 MODULE_PASS("coro-cleanup", CoroCleanupPass())
@@ -141,6 +142,7 @@ MODULE_PASS("tsan-module", ModuleThreadSanitizerPass())
 MODULE_PASS("verify", VerifierPass())
 MODULE_PASS("view-callgraph", CallGraphViewerPass())
 MODULE_PASS("wholeprogramdevirt", WholeProgramDevirtPass())
+MODULE_PASS("host-rpc", HostRPCPass())
 #undef MODULE_PASS
 
 #ifndef MODULE_PASS_WITH_PARAMS
