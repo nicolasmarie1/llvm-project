@@ -2,11 +2,11 @@
 ; RUN: llc -mtriple=amdgcn -mcpu=gfx908 -mattr=-mfma-inline-literal-bug -verify-machineinstrs < %s | FileCheck -enable-var-scope --check-prefixes=GCN,GFX908 %s
 ; RUN: llc -mtriple=amdgcn -mcpu=gfx90a -verify-machineinstrs < %s | FileCheck -enable-var-scope --check-prefixes=GCN,GFX90A %s
 
-declare <32 x float> @llvm.amdgcn.mfma.f32.32x32x2bf16(<2 x i16>, <2 x i16>, <32 x float>, i32, i32, i32)
-declare <16 x float> @llvm.amdgcn.mfma.f32.16x16x2bf16(<2 x i16>, <2 x i16>, <16 x float>, i32, i32, i32)
-declare <4 x float> @llvm.amdgcn.mfma.f32.4x4x2bf16(<2 x i16>, <2 x i16>, <4 x float>, i32, i32, i32)
-declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x4bf16(<2 x i16>, <2 x i16>, <16 x float>, i32, i32, i32)
-declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x8bf16(<2 x i16>, <2 x i16>, <4 x float>, i32, i32, i32)
+declare <32 x float> @llvm.amdgcn.mfma.f32.32x32x2bf16(<2 x bfloat>, <2 x bfloat>, <32 x float>, i32, i32, i32)
+declare <16 x float> @llvm.amdgcn.mfma.f32.16x16x2bf16(<2 x bfloat>, <2 x bfloat>, <16 x float>, i32, i32, i32)
+declare <4 x float> @llvm.amdgcn.mfma.f32.4x4x2bf16(<2 x bfloat>, <2 x bfloat>, <4 x float>, i32, i32, i32)
+declare <16 x float> @llvm.amdgcn.mfma.f32.32x32x4bf16(<2 x bfloat>, <2 x bfloat>, <16 x float>, i32, i32, i32)
+declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x8bf16(<2 x bfloat>, <2 x bfloat>, <4 x float>, i32, i32, i32)
 declare i32 @llvm.amdgcn.workitem.id.x()
 
 ; GCN-LABEL: {{^}}test_mfma_f32_32x32x2bf16:
@@ -55,9 +55,9 @@ declare i32 @llvm.amdgcn.workitem.id.x()
 define amdgpu_kernel void @test_mfma_f32_32x32x2bf16(ptr addrspace(1) %arg) #0 {
 bb:
   %in.1 = load <32 x float>, ptr addrspace(1) %arg
-  %a = bitcast i32 1 to <2 x i16>
-  %b = bitcast i32 2 to <2 x i16>
-  %mai.1 = tail call <32 x float> @llvm.amdgcn.mfma.f32.32x32x2bf16(<2 x i16> %a, <2 x i16> %b, <32 x float> %in.1, i32 1, i32 2, i32 3)
+  %a = bitcast i32 1 to <2 x bfloat>
+  %b = bitcast i32 2 to <2 x bfloat>
+  %mai.1 = tail call <32 x float> @llvm.amdgcn.mfma.f32.32x32x2bf16(<2 x bfloat> %a, <2 x bfloat> %b, <32 x float> %in.1, i32 1, i32 2, i32 3)
   store <32 x float> %mai.1, ptr addrspace(1) %arg
   ret void
 }
@@ -76,9 +76,9 @@ bb:
 define amdgpu_kernel void @test_mfma_f32_16x16x2bf16(ptr addrspace(1) %arg) #0 {
 bb:
   %in.1 = load <16 x float>, ptr addrspace(1) %arg
-  %a = bitcast i32 1 to <2 x i16>
-  %b = bitcast i32 2 to <2 x i16>
-  %mai.1 = tail call <16 x float> @llvm.amdgcn.mfma.f32.16x16x2bf16(<2 x i16> %a, <2 x i16> %b, <16 x float> %in.1, i32 1, i32 2, i32 3)
+  %a = bitcast i32 1 to <2 x bfloat>
+  %b = bitcast i32 2 to <2 x bfloat>
+  %mai.1 = tail call <16 x float> @llvm.amdgcn.mfma.f32.16x16x2bf16(<2 x bfloat> %a, <2 x bfloat> %b, <16 x float> %in.1, i32 1, i32 2, i32 3)
   store <16 x float> %mai.1, ptr addrspace(1) %arg
   ret void
 }
@@ -97,9 +97,9 @@ bb:
 define amdgpu_kernel void @test_mfma_f32_4x4x2bf16(ptr addrspace(1) %arg) #0 {
 bb:
   %in.1 = load <4 x float>, ptr addrspace(1) %arg
-  %a = bitcast i32 1 to <2 x i16>
-  %b = bitcast i32 2 to <2 x i16>
-  %mai.1 = tail call <4 x float> @llvm.amdgcn.mfma.f32.4x4x2bf16(<2 x i16> %a, <2 x i16> %b, <4 x float> %in.1, i32 1, i32 2, i32 3)
+  %a = bitcast i32 1 to <2 x bfloat>
+  %b = bitcast i32 2 to <2 x bfloat>
+  %mai.1 = tail call <4 x float> @llvm.amdgcn.mfma.f32.4x4x2bf16(<2 x bfloat> %a, <2 x bfloat> %b, <4 x float> %in.1, i32 1, i32 2, i32 3)
   store <4 x float> %mai.1, ptr addrspace(1) %arg
   ret void
 }
@@ -118,9 +118,9 @@ bb:
 define amdgpu_kernel void @test_mfma_f32_32x32x4bf16(ptr addrspace(1) %arg) #0 {
 bb:
   %in.1 = load <16 x float>, ptr addrspace(1) %arg
-  %a = bitcast i32 1 to <2 x i16>
-  %b = bitcast i32 2 to <2 x i16>
-  %mai.1 = tail call <16 x float> @llvm.amdgcn.mfma.f32.32x32x4bf16(<2 x i16> %a, <2 x i16> %b, <16 x float> %in.1, i32 1, i32 2, i32 3)
+  %a = bitcast i32 1 to <2 x bfloat>
+  %b = bitcast i32 2 to <2 x bfloat>
+  %mai.1 = tail call <16 x float> @llvm.amdgcn.mfma.f32.32x32x4bf16(<2 x bfloat> %a, <2 x bfloat> %b, <16 x float> %in.1, i32 1, i32 2, i32 3)
   store <16 x float> %mai.1, ptr addrspace(1) %arg
   ret void
 }
@@ -139,9 +139,9 @@ bb:
 define amdgpu_kernel void @test_mfma_f32_16x16x8bf16(ptr addrspace(1) %arg) #0 {
 bb:
   %in.1 = load <4 x float>, ptr addrspace(1) %arg
-  %a = bitcast i32 1 to <2 x i16>
-  %b = bitcast i32 2 to <2 x i16>
-  %mai.1 = tail call <4 x float> @llvm.amdgcn.mfma.f32.16x16x8bf16(<2 x i16> %a, <2 x i16> %b, <4 x float> %in.1, i32 1, i32 2, i32 3)
+  %a = bitcast i32 1 to <2 x bfloat>
+  %b = bitcast i32 2 to <2 x bfloat>
+  %mai.1 = tail call <4 x float> @llvm.amdgcn.mfma.f32.16x16x8bf16(<2 x bfloat> %a, <2 x bfloat> %b, <4 x float> %in.1, i32 1, i32 2, i32 3)
   store <4 x float> %mai.1, ptr addrspace(1) %arg
   ret void
 }

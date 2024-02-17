@@ -133,35 +133,45 @@ void test_mfma_i32_16x16x16i8(global v4i* out, int a, int b, v4i c)
 }
 
 // CHECK-GFX908-LABEL: @test_mfma_f32_32x32x2bf16
-// CHECK-GFX908: call <32 x float> @llvm.amdgcn.mfma.f32.32x32x2bf16(<2 x i16> %a, <2 x i16> %b, <32 x float> %c, i32 0, i32 0, i32 0)
+// CHECK-GFX908: [[s1:%[0-9]+]] = bitcast <2 x i16> %a to <2 x bfloat>
+// CHECK-GFX908-NEXT: [[s2:%[0-9]+]] = bitcast <2 x i16> %b to <2 x bfloat>
+// CHECK-GFX908-NEXT: call <32 x float> @llvm.amdgcn.mfma.f32.32x32x2bf16(<2 x bfloat> [[s1]], <2 x bfloat> [[s2]], <32 x float> %c, i32 0, i32 0, i32 0)
 void test_mfma_f32_32x32x2bf16(global v32f* out, v2s a, v2s b, v32f c)
 {
   *out = __builtin_amdgcn_mfma_f32_32x32x2bf16(a, b, c, 0, 0, 0);
 }
 
 // CHECK-GFX908-LABEL: @test_mfma_f32_16x16x2bf16
-// CHECK-GFX908: call <16 x float> @llvm.amdgcn.mfma.f32.16x16x2bf16(<2 x i16> %a, <2 x i16> %b, <16 x float> %c, i32 0, i32 0, i32 0)
+// CHECK-GFX908: [[s1:%[0-9]+]] = bitcast <2 x i16> %a to <2 x bfloat>
+// CHECK-GFX908-NEXT: [[s2:%[0-9]+]] = bitcast <2 x i16> %b to <2 x bfloat>
+// CHECK-GFX908: call <16 x float> @llvm.amdgcn.mfma.f32.16x16x2bf16(<2 x bfloat> [[s1]], <2 x bfloat> [[s2]], <16 x float> %c, i32 0, i32 0, i32 0)
 void test_mfma_f32_16x16x2bf16(global v16f* out, v2s a, v2s b, v16f c)
 {
   *out = __builtin_amdgcn_mfma_f32_16x16x2bf16(a, b, c, 0, 0, 0);
 }
 
 // CHECK-GFX908-LABEL: @test_mfma_f32_4x4x2bf16
-// CHECK-GFX908: call <4 x float> @llvm.amdgcn.mfma.f32.4x4x2bf16(<2 x i16> %a, <2 x i16> %b, <4 x float> %c, i32 0, i32 0, i32 0)
+// CHECK-GFX908: [[s1:%[0-9]+]] = bitcast <2 x i16> %a to <2 x bfloat>
+// CHECK-GFX908-NEXT: [[s2:%[0-9]+]] = bitcast <2 x i16> %b to <2 x bfloat>
+// CHECK-GFX908: call <4 x float> @llvm.amdgcn.mfma.f32.4x4x2bf16(<2 x bfloat> [[s1]], <2 x bfloat> [[s2]], <4 x float> %c, i32 0, i32 0, i32 0)
 void test_mfma_f32_4x4x2bf16(global v4f* out, v2s a, v2s b, v4f c)
 {
   *out = __builtin_amdgcn_mfma_f32_4x4x2bf16(a, b, c, 0, 0, 0);
 }
 
 // CHECK-GFX908-LABEL: @test_mfma_f32_32x32x4bf16
-// CHECK-GFX908: call <16 x float> @llvm.amdgcn.mfma.f32.32x32x4bf16(<2 x i16> %a, <2 x i16> %b, <16 x float> %c, i32 0, i32 0, i32 0)
+// CHECK-GFX908: [[s1:%[0-9]+]] = bitcast <2 x i16> %a to <2 x bfloat>
+// CHECK-GFX908-NEXT: [[s2:%[0-9]+]] = bitcast <2 x i16> %b to <2 x bfloat>
+// CHECK-GFX908: call <16 x float> @llvm.amdgcn.mfma.f32.32x32x4bf16(<2 x bfloat> [[s1]], <2 x bfloat> [[s2]], <16 x float> %c, i32 0, i32 0, i32 0)
 void test_mfma_f32_32x32x4bf16(global v16f* out, v2s a, v2s b, v16f c)
 {
   *out = __builtin_amdgcn_mfma_f32_32x32x4bf16(a, b, c, 0, 0, 0);
 }
 
 // CHECK-GFX908-LABEL: @test_mfma_f32_16x16x8bf16
-// CHECK-GFX908: call <4 x float> @llvm.amdgcn.mfma.f32.16x16x8bf16(<2 x i16> %a, <2 x i16> %b, <4 x float> %c, i32 0, i32 0, i32 0)
+// CHECK-GFX908: [[s1:%[0-9]+]] = bitcast <2 x i16> %a to <2 x bfloat>
+// CHECK-GFX908-NEXT: [[s2:%[0-9]+]] = bitcast <2 x i16> %b to <2 x bfloat>
+// CHECK-GFX908: call <4 x float> @llvm.amdgcn.mfma.f32.16x16x8bf16(<2 x bfloat> [[s1]], <2 x bfloat> [[s2]], <4 x float> %c, i32 0, i32 0, i32 0)
 void test_mfma_f32_16x16x8bf16(global v4f* out, v2s a, v2s b, v4f c)
 {
   *out = __builtin_amdgcn_mfma_f32_16x16x8bf16(a, b, c, 0, 0, 0);
@@ -172,35 +182,45 @@ void test_mfma_f32_16x16x8bf16(global v4f* out, v2s a, v2s b, v4f c)
 #ifdef MFMA_GFX90A_TESTS
 
 // CHECK-GFX90A-LABEL: @test_mfma_f32_32x32x4bf16_1k
-// CHECK-GFX90A: call <32 x float> @llvm.amdgcn.mfma.f32.32x32x4bf16.1k(<4 x i16> %a, <4 x i16> %b, <32 x float> %c, i32 0, i32 0, i32 0)
+// CHECK-GFX90A: [[s1:%[0-9]+]] = bitcast <4 x i16> %a to <4 x bfloat>
+// CHECK-GFX90A-NEXT: [[s2:%[0-9]+]] = bitcast <4 x i16> %b to <4 x bfloat>
+// CHECK-GFX90A: call <32 x float> @llvm.amdgcn.mfma.f32.32x32x4bf16.1k(<4 x bfloat> [[s1]], <4 x bfloat> [[s2]], <32 x float> %c, i32 0, i32 0, i32 0)
 void test_mfma_f32_32x32x4bf16_1k(global v32f* out, v4s a, v4s b, v32f c)
 {
   *out = __builtin_amdgcn_mfma_f32_32x32x4bf16_1k(a, b, c, 0, 0, 0);
 }
 
 // CHECK-GFX90A-LABEL: @test_mfma_f32_16x16x4bf16_1k
-// CHECK-GFX90A: call <16 x float> @llvm.amdgcn.mfma.f32.16x16x4bf16.1k(<4 x i16> %a, <4 x i16> %b, <16 x float> %c, i32 0, i32 0, i32 0)
+// CHECK-GFX90A: [[s1:%[0-9]+]] = bitcast <4 x i16> %a to <4 x bfloat>
+// CHECK-GFX90A-NEXT: [[s2:%[0-9]+]] = bitcast <4 x i16> %b to <4 x bfloat>
+// CHECK-GFX90A: call <16 x float> @llvm.amdgcn.mfma.f32.16x16x4bf16.1k(<4 x bfloat> [[s1]], <4 x bfloat> [[s2]], <16 x float> %c, i32 0, i32 0, i32 0)
 void test_mfma_f32_16x16x4bf16_1k(global v16f* out, v4s a, v4s b, v16f c)
 {
   *out = __builtin_amdgcn_mfma_f32_16x16x4bf16_1k(a, b, c, 0, 0, 0);
 }
 
 // CHECK-GFX90A-LABEL: @test_mfma_f32_4x4x4bf16_1k
-// CHECK-GFX90A: call <4 x float> @llvm.amdgcn.mfma.f32.4x4x4bf16.1k(<4 x i16> %a, <4 x i16> %b, <4 x float> %c, i32 0, i32 0, i32 0)
+// CHECK-GFX90A: [[s1:%[0-9]+]] = bitcast <4 x i16> %a to <4 x bfloat>
+// CHECK-GFX90A-NEXT: [[s2:%[0-9]+]] = bitcast <4 x i16> %b to <4 x bfloat>
+// CHECK-GFX90A: call <4 x float> @llvm.amdgcn.mfma.f32.4x4x4bf16.1k(<4 x bfloat> [[s1]], <4 x bfloat> [[s2]], <4 x float> %c, i32 0, i32 0, i32 0)
 void test_mfma_f32_4x4x4bf16_1k(global v4f* out, v4s a, v4s b, v4f c)
 {
   *out = __builtin_amdgcn_mfma_f32_4x4x4bf16_1k(a, b, c, 0, 0, 0);
 }
 
 // CHECK-GFX90A-LABEL: @test_mfma_f32_32x32x8bf16_1k
-// CHECK-GFX90A: call <16 x float> @llvm.amdgcn.mfma.f32.32x32x8bf16.1k(<4 x i16> %a, <4 x i16> %b, <16 x float> %c, i32 0, i32 0, i32 0)
+// CHECK-GFX90A: [[s1:%[0-9]+]] = bitcast <4 x i16> %a to <4 x bfloat>
+// CHECK-GFX90A-NEXT: [[s2:%[0-9]+]] = bitcast <4 x i16> %b to <4 x bfloat>
+// CHECK-GFX90A: call <16 x float> @llvm.amdgcn.mfma.f32.32x32x8bf16.1k(<4 x bfloat> [[s1]], <4 x bfloat> [[s2]], <16 x float> %c, i32 0, i32 0, i32 0)
 void test_mfma_f32_32x32x8bf16_1k(global v16f* out, v4s a, v4s b, v16f c)
 {
   *out = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k(a, b, c, 0, 0, 0);
 }
 
 // CHECK-GFX90A-LABEL: @test_mfma_f32_16x16x16bf16_1k
-// CHECK-GFX90A: call <4 x float> @llvm.amdgcn.mfma.f32.16x16x16bf16.1k(<4 x i16> %a, <4 x i16> %b, <4 x float> %c, i32 0, i32 0, i32 0)
+// CHECK-GFX90A: [[s1:%[0-9]+]] = bitcast <4 x i16> %a to <4 x bfloat>
+// CHECK-GFX90A-NEXT: [[s2:%[0-9]+]] = bitcast <4 x i16> %b to <4 x bfloat>
+// CHECK-GFX90A: call <4 x float> @llvm.amdgcn.mfma.f32.16x16x16bf16.1k(<4 x bfloat> [[s1]], <4 x bfloat> [[s2]], <4 x float> %c, i32 0, i32 0, i32 0)
 void test_mfma_f32_16x16x16bf16_1k(global v4f* out, v4s a, v4s b, v4f c)
 {
   *out = __builtin_amdgcn_mfma_f32_16x16x16bf16_1k(a, b, c, 0, 0, 0);
