@@ -2044,7 +2044,7 @@ struct AAPointerInfoCallSiteArgument final : AAPointerInfoFloating {
     if (AA::isAssumedReadNone(A, getIRPosition(), *this, IsKnown))
       return ChangeStatus::UNCHANGED;
     bool ReadOnly = AA::isAssumedReadOnly(A, getIRPosition(), *this, IsKnown);
-    auto Kind =o
+    auto Kind =
         ReadOnly ? AccessKind::AK_MAY_READ : AccessKind::AK_MAY_READ_WRITE;
     return addAccess(A, AA::RangeTy::getUnknown(), *getCtxI(), nullptr, Kind,
                      nullptr);

@@ -72,7 +72,7 @@ extern "C" {
 /// In fact, it is a separate stack *per warp*. That means, each warp must push
 /// and pop symmetrically or this breaks, badly. The implementation will (aim
 /// to) detect non-lock-step warps and fallback to malloc/free. The same will
-/// happen if a woarp runs out of memory. The master warp in generic memory is
+/// happen if a warp runs out of memory. The master warp in generic memory is
 /// special and is given more memory than the rest.
 ///
 struct SharedMemorySmartStackTy {
@@ -375,9 +375,9 @@ int omp_get_thread_num(void) {
 }
 
 int omp_get_bulk_thread_num() {
-  ASSERT(mapping::isSPMDMode());
-  int BId = mapping::getBlockId();
-  int BSize = mapping::getBlockSize(/* IsSPMD */ true);
+  ASSERT(mapping::isSPMDMode(), "Not SPMD");
+  int BId = mapping::getBlockIdInKernel();
+  int BSize = mapping::getMaxTeamThreads();
   int TId = mapping::getThreadIdInBlock();
   int Id = BId * BSize + TId;
   return returnValIfLevelIsActive(omp_get_level(), Id, 0);
@@ -392,8 +392,8 @@ int omp_get_num_threads(void) {
 }
 
 int omp_get_bulk_num_threads(void) {
-  ASSERT(mapping::isSPMDMode());
-  return mapping::getKernelSize();
+  ASSERT(mapping::isSPMDMode(), "Not SPMD");
+  return mapping::getNumberOfThreadsInKernel();
 }
 
 int omp_get_thread_limit(void) { return mapping::getMaxTeamThreads(); }

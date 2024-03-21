@@ -79,7 +79,7 @@ bool isInternalFunction(Function &F) {
   auto Name = F.getName();
 
   for (auto *P : InternalPrefix)
-    if (Name.startswith(P))
+    if (Name.starts_with(P))
       return true;
 
   return false;
@@ -218,13 +218,10 @@ public:
     assert(&M.getContext() == &HM.getContext() &&
            "device and host modules have different context");
 
-#define __OMP_TYPE(TYPE) TYPE = Type::get##TYPE(Context)
-    __OMP_TYPE(Int8PtrTy);
-    __OMP_TYPE(VoidTy);
-    __OMP_TYPE(Int32Ty);
-    __OMP_TYPE(Int64Ty);
-#undef __OMP_TYPE
-
+    Int8PtrTy = PointerType::getUnqual(Context);
+    VoidTy = Type::getVoidTy(Context);
+    Int32Ty = Type::getInt32Ty(Context);
+    Int64Ty = Type::getInt64Ty(Context);
     NullPtr = ConstantInt::getNullValue(Int8PtrTy);
     NullInt64 = ConstantInt::getNullValue(Int64Ty);
 
@@ -314,12 +311,15 @@ Constant *HostRPC::convertToInt64Ty(Constant *C) {
     return ConstantExpr::getPtrToInt(C, Int64Ty);
 
   if (T->isIntegerTy())
-    return ConstantExpr::getIntegerCast(C, Int64Ty, /* isSigned */ true);
+    llvm_unreachable("I don't know how to fixe this");
+    //return ConstantExpr::getIntegerCast(C, Int64Ty, /* isSigned */ true);
 
   if (T->isFloatingPointTy()) {
-    C = ConstantExpr::getBitCast(
-        C, Type::getIntNTy(C->getContext(), T->getScalarSizeInBits()));
-    return ConstantExpr::getIntegerCast(C, Int64Ty, /* isSigned */ true);
+    // TODO: FIXEME getIntegerCast is hard to implement with new version of ConstExpr
+    //C = ConstantExpr::getBitCast(
+    //    C, Type::getIntNTy(C->getContext(), T->getScalarSizeInBits()));
+    //return ConstantExpr::getIntegerCast(C, Int64Ty, /* isSigned */ true);
+    llvm_unreachable("unsuported cast from float to int64_t");
   }
 
   llvm_unreachable("unknown cast to int64_t");
@@ -333,13 +333,16 @@ Constant *HostRPC::convertFromInt64TyTo(Constant *C, Type *T) {
     return ConstantExpr::getIntToPtr(C, T);
 
   if (T->isIntegerTy())
-    return ConstantExpr::getIntegerCast(C, T, /* isSigned */ true);
+    llvm_unreachable("I don't know how to fixe this");
+    //return ConstantExpr::getIntegerCast(C, T, /* isSigned */ true);
 
   if (T->isFloatingPointTy()) {
-    C = ConstantExpr::getIntegerCast(
-        C, Type::getIntNTy(C->getContext(), T->getScalarSizeInBits()),
-        /* isSigned */ true);
-    return ConstantExpr::getBitCast(C, T);
+    // TODO: FIXEME getIntegerCast is hard to implement with new version of ConstExpr
+    //C = ConstantExpr::getIntegerCast(
+    //    C, Type::getIntNTy(C->getContext(), T->getScalarSizeInBits()),
+    //    /* isSigned */ true);
+    //return ConstantExpr::getBitCast(C, T);
+    llvm_unreachable("unsuported cast from int64_t to float");
   }
 
   llvm_unreachable("unknown cast from int64_t");
@@ -494,7 +497,7 @@ bool HostRPC::rewriteWithHostRPC(Function *F) {
       Function *Callee = CI->getCalledFunction();
       if (this->FunctionWorkList.count(Callee))
         return true;
-      return Callee->getName().startswith("__kmpc_host_rpc_wrapper_");
+      return Callee->getName().starts_with("__kmpc_host_rpc_wrapper_");
     };
 
     auto CheckIfDynAlloc = [](Value *V) -> CallInst * {
@@ -604,7 +607,7 @@ bool HostRPC::rewriteWithHostRPC(Function *F) {
         return true;
       };
 
-      auto &AAUO = A.getOrCreateAAFor<AAUnderlyingObjects>(
+      auto &AAUO = *A.getOrCreateAAFor<AAUnderlyingObjects>(
           IRPosition::callsite_argument(*CI, I), nullptr, DepClassTy::NONE);
       if (!AAUO.forallUnderlyingObjects(Pred))
         llvm_unreachable("internal error");
