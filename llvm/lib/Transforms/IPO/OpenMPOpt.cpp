@@ -934,9 +934,9 @@ bool canUseMultiTeam(Function *OutlinedFn, OMPInformationCache &OMPInfoCache) {
   return true;
 }
 
-void collectReachingKernels(KernelSet &Kernels, Function *F,
+void collectReachingKernels(Function *F,
                             SmallVector<Kernel> &ReachingKernels) {
-  if (Kernels.count(F)) {
+  if (omp::isOpenMPKernel(*F)) {
     if (F->hasFnAttribute("omp_parallel_51_kernel"))
       ReachingKernels.push_back(F);
     return;
@@ -945,7 +945,7 @@ void collectReachingKernels(KernelSet &Kernels, Function *F,
     auto *I = dyn_cast<Instruction>(U);
     if (!I)
       continue;
-    collectReachingKernels(Kernels, I->getFunction(), ReachingKernels);
+    collectReachingKernels(I->getFunction(), ReachingKernels);
   }
 }
 
@@ -1125,7 +1125,7 @@ private:
       // int32_t num_threads
       ArgTypes.push_back(Type::getInt32Ty(Ctx));
       // void **args
-      ArgTypes.push_back(Type::getInt8PtrTy(Ctx));
+      ArgTypes.push_back(PointerType::getUnqual(Ctx));
       // int64_t nargs
       ArgTypes.push_back(Type::getInt64Ty(Ctx));
 
@@ -1239,7 +1239,6 @@ private:
     for (CallInst *CI : WorkItems) {
       Function *K = CreateNewKernel(Ctx, M, OMPInfoCache.OMPBuilder,
                                     Parallel51RFI.Declaration, CI);
-      OMPInfoCache.Kernels.insert(K);
 
       constexpr const unsigned OutlinedFnArgNum = 5;
       Function *OutlinedFn =
@@ -1284,7 +1283,9 @@ private:
     }
 
     if (OnlyUsedByParallelKernel) {
-      for (auto K : OMPInfoCache.Kernels) {
+      for (auto K : SCC) {
+        if (!omp::isOpenMPKernel(*K))
+          continue;
         Attribute Attr = K->getFnAttribute("omp_parallel_51_kernel");
         if (Attr.isValid())
           continue;
@@ -1343,7 +1344,7 @@ private:
 
     auto CheckIfOnlyUsedByParallelKernel = [&](CallInst *CI) {
       SmallVector<Kernel> ReachingKernels;
-      collectReachingKernels(OMPInfoCache.Kernels, CI->getFunction(),
+      collectReachingKernels(CI->getFunction(),
                              ReachingKernels);
       return ReachingKernels.size() < 2;
     };

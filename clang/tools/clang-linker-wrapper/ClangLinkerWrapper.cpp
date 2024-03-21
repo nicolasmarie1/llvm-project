@@ -682,7 +682,7 @@ std::unique_ptr<lto::LTO> createLTO(
   }
 
   Conf.PreOptModuleHook = PreHook;
-  Conf.PostOptModuleHook = Hook;
+  Conf.PostOptModuleHook = PostHook;
   Conf.CGFileType = (Triple.isNVPTX() || SaveTemps)
                         ? CodeGenFileType::AssemblyFile
                         : CodeGenFileType::ObjectFile;
@@ -746,7 +746,7 @@ std::unique_ptr<lto::LTO> createHostRPCLTO(StringRef HostTriple) {
 
   Conf.PTO.LoopVectorization = Conf.OptLevel > 1;
   Conf.PTO.SLPVectorization = Conf.OptLevel > 1;
-  Conf.CGFileType = CGFT_ObjectFile;
+  Conf.CGFileType = CodeGenFileType::ObjectFile;
 
   Conf.HasWholeProgramVisibility = false;
 

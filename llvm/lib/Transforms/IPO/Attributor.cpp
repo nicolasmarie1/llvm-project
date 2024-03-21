@@ -402,7 +402,7 @@ static bool getPotentialCopiesOfMemoryValue(
       bool R = false;
       if (CB) {
         auto &AAN =
-            A.getOrCreateAAFor<AANoAlias>(IRPosition::callsite_returned(*CB),
+            *A.getOrCreateAAFor<AANoAlias>(IRPosition::callsite_returned(*CB),
                                           &QueryingAA, DepClassTy::OPTIONAL);
         if (AAN.isValidState())
           R = AAN.isAssumedNoAlias();

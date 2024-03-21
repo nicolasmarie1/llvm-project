@@ -89,7 +89,7 @@ static_assert(sizeof(WarpAllocatorEntry) == 16, "entry size mismatch");
 template <uint32_t WARP_SIZE, uint32_t TEAM_SIZE> struct WarpAllocator {
   void init() {
     if (mapping::isSPMDMode() &&
-        (mapping::getThreadIdInBlock() || mapping::getBlockId()))
+        (mapping::getThreadIdInBlock() || mapping::getBlockIdInKernel()))
       return;
 
     size_t HeapSize = omptarget_device_heap_size;
@@ -222,7 +222,7 @@ private:
            getBlockBegin(TIdInWarp, TeamSlot);
   }
 
-  static int32_t getTeamSlot() { return mapping::getBlockId() % TEAM_SIZE; }
+  static int32_t getTeamSlot() { return mapping::getBlockIdInKernel() % TEAM_SIZE; }
 
   WarpAllocatorEntry *findMemorySlow(size_t Size, int32_t TIdInWarp,
                                      int32_t TeamSlot) {

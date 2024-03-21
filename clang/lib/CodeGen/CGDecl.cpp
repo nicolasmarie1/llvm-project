@@ -2200,7 +2200,7 @@ void CodeGenFunction::pushLifetimeExtendedDestroy(CleanupKind cleanupKind,
                                                   bool useEHCleanupForArray) {
   // If we're not in a conditional branch, we don't need to bother generating a
   // conditional cleanup.
-  if (!isInConoditionalBranch()) {
+  if (!isInConditionalBranch()) {
     // Push an EH-only cleanup for the object now.
     // FIXME: When popping normal cleanups, we need to keep this EH cleanup
     // around in case a temporary's destructor throws an exception.
@@ -2516,7 +2516,7 @@ void CodeGenFunction::EmitParmDecl(const VarDecl &D, ParamValue Arg,
   // Use better IR generation for certain implicit parameters.
   if (auto IPD = dyn_cast<ImplicitParamDecl>(&D)) {
     // The only implicit argument a block has is its literal.
-    // This may be passed as an inalloca'ed valuoe on Windows x86.
+    // This may be passed as an inalloca'ed value on Windows x86.
     if (BlockInfo) {
       llvm::Value *V = Arg.isIndirect()
                            ? Builder.CreateLoad(Arg.getIndirectAddress())
