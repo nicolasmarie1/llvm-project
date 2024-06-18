@@ -94,10 +94,12 @@ PreservedAnalyses CanonicalizeMainFunctionPass::run(Module &M,
     Changed = true;
   }
 
-  if (rewriteMainFunction(*MainFunc)) {
-    MainFunc->eraseFromParent();
-    Changed = true;
-  }
+  assert(MainFunc->arg_size() == 2 && MainFunc->getReturnType()->isIntegerTy(32)
+      && "[Canonicalize Main Function] wrong user main function type; should be: int main(int argc, char** argv) (in CanonicalizeMainFunction.cpp)");
+//  if (rewriteMainFunction(*MainFunc)) {
+//    MainFunc->eraseFromParent();
+//    Changed = true;
+//  }
 
   return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
