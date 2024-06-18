@@ -29,7 +29,7 @@ LIBC_INLINE constexpr cpp::enable_if_t<
     (sizeof(To) == sizeof(From)) &&
 // Implementation of bit_cast that cannot use the compiler builtin must be
 // trivially-constructible To, to avoid UB in the implementation.
-#if !LIBC_HAS_BUILTIN(__builtin_bit_cast)
+#if !__has_builtin(__builtin_bit_cast)
         cpp::is_trivially_constructible<To>::value &&
 #endif
         cpp::is_trivially_copyable<To>::value &&
