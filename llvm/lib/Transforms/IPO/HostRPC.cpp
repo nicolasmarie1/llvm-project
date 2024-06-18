@@ -12,6 +12,7 @@
 #include "llvm/Transforms/IPO/HostRPC.h"
 
 #include "llvm/ADT/EnumeratedArray.h"
+#include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/CodeGen/CommandFlags.h"
 #include "llvm/Frontend/OpenMP/OMPDeviceConstants.h"
 #include "llvm/IR/BasicBlock.h"
@@ -30,7 +31,6 @@
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/Transforms/IPO/Attributor.h"
-
 #include <cstdint>
 
 #define DEBUG_TYPE "host-rpc"
@@ -73,7 +73,9 @@ __OMPRTL_HOST_RPC(__kmpc_host_rpc_invoke_host_wrapper)
 static constexpr const char *InternalPrefix[] = {
     "__kmp", "llvm.",        "nvm.",
     "omp_",  "vprintf",      "malloc",
-    "free",  "__keep_alive", "__llvm_omp_vprintf"};
+    "free",  "__keep_alive", "__llvm_omp_vprintf",
+    "rpc_"
+};
 
 bool isInternalFunction(Function &F) {
   auto Name = F.getName();
@@ -150,8 +152,7 @@ class HostRPC {
   SmallVector<Function *> HostEntryTable;
 
   EnumeratedArray<Function *, HostRPCRuntimeFunction,
-                  HostRPCRuntimeFunction::OMPRTL___last>
-      RFIs;
+                  HostRPCRuntimeFunction::OMPRTL___last> RFIs;
 
   SmallVector<std::pair<CallInst *, CallInst *>> CallInstMap;
 
@@ -228,21 +229,31 @@ public:
 #define __OMP_RTL(_ENUM, MOD, VARARG, RETTY, ...)                              \
   {                                                                            \
     SmallVector<Type *> Params{__VA_ARGS__};                                   \
-    FunctionType *FT = FunctionType::get(RETTY, Params, VARARG);               \
     Function *F = (MOD).getFunction(#_ENUM);                                   \
-    if (!F)                                                                    \
+    if (!F) {                                                                  \
+      FunctionType *FT = FunctionType::get(RETTY, Params, VARARG);             \
       F = Function::Create(FT, GlobalValue::LinkageTypes::ExternalLinkage,     \
                            #_ENUM, (MOD));                                     \
+    }                                                                          \
     RFIs[OMPRTL_##_ENUM] = F;                                                  \
   }
+    // devices functions:
+    // get information about the functions that we are calling
     __OMP_RTL(__kmpc_host_rpc_get_desc, M, false, Int8PtrTy, Int32Ty, Int32Ty,
               Int8PtrTy)
+    // get arguments information about one of the argument
     __OMP_RTL(__kmpc_host_rpc_add_arg, M, false, VoidTy, Int8PtrTy, Int64Ty,
               Int32Ty)
+    // send the function to the host the function
     __OMP_RTL(__kmpc_host_rpc_send_and_wait, M, false, Int64Ty, Int8PtrTy)
+
+    // host functions:
+    // get arguments (mirror of add arg)
     __OMP_RTL(__kmpc_host_rpc_get_arg, HM, false, Int64Ty, Int8PtrTy, Int32Ty)
+    // send the ruturn value
     __OMP_RTL(__kmpc_host_rpc_set_ret_val, HM, false, VoidTy, Int8PtrTy,
               Int64Ty)
+    // Invoke the function on the host
     __OMP_RTL(__kmpc_host_rpc_invoke_host_wrapper, HM, false, VoidTy, Int32Ty,
               Int8PtrTy)
 #undef __OMP_RTL
@@ -298,6 +309,10 @@ Value *HostRPC::convertFromInt64TyTo(Value *V, Type *T) {
     return Builder.CreateBitCast(V, T);
   }
 
+
+  LLVM_DEBUG(dbgs() << "[HostRPC] unknown type " << *T
+                    << "  for typeFromint64_t.\n";);
+
   llvm_unreachable("unknown cast from int64_t");
 }
 
@@ -310,39 +325,40 @@ Constant *HostRPC::convertToInt64Ty(Constant *C) {
   if (T->isPointerTy())
     return ConstantExpr::getPtrToInt(C, Int64Ty);
 
-  if (T->isIntegerTy())
-    llvm_unreachable("I don't know how to fixe this");
-    //return ConstantExpr::getIntegerCast(C, Int64Ty, /* isSigned */ true);
+  if (T->isIntegerTy()) {
+    return ConstantFoldIntegerCast(C, Int64Ty, true, DL);
+  }
 
   if (T->isFloatingPointTy()) {
-    // TODO: FIXEME getIntegerCast is hard to implement with new version of ConstExpr
-    //C = ConstantExpr::getBitCast(
-    //    C, Type::getIntNTy(C->getContext(), T->getScalarSizeInBits()));
-    //return ConstantExpr::getIntegerCast(C, Int64Ty, /* isSigned */ true);
-    llvm_unreachable("unsuported cast from float to int64_t");
+    // cast to an int of the same size
+    C = ConstantExpr::getBitCast(C,
+        Type::getIntNTy(C->getContext(), T->getScalarSizeInBits()));
+    // set the int of size 64
+    return ConstantFoldIntegerCast(C, Int64Ty, true, DL);
   }
 
   llvm_unreachable("unknown cast to int64_t");
 }
 
 Constant *HostRPC::convertFromInt64TyTo(Constant *C, Type *T) {
+  assert(C->getType() == Int64Ty);
+
   if (T == Int64Ty)
     return C;
 
   if (T->isPointerTy())
     return ConstantExpr::getIntToPtr(C, T);
 
-  if (T->isIntegerTy())
-    llvm_unreachable("I don't know how to fixe this");
-    //return ConstantExpr::getIntegerCast(C, T, /* isSigned */ true);
+  if (T->isIntegerTy()) {
+    return ConstantFoldIntegerCast(C, T, true, DL);
+  }
 
   if (T->isFloatingPointTy()) {
-    // TODO: FIXEME getIntegerCast is hard to implement with new version of ConstExpr
-    //C = ConstantExpr::getIntegerCast(
-    //    C, Type::getIntNTy(C->getContext(), T->getScalarSizeInBits()),
-    //    /* isSigned */ true);
-    //return ConstantExpr::getBitCast(C, T);
-    llvm_unreachable("unsuported cast from int64_t to float");
+    // change size to T size
+    C = ConstantFoldIntegerCast(C,
+        Type::getIntNTy(C->getContext(), T->getScalarSizeInBits()), true, DL);
+    // from int to float
+    return ConstantExpr::getBitCast(C, T);
   }
 
   llvm_unreachable("unknown cast from int64_t");
@@ -382,6 +398,10 @@ bool HostRPC::recollectInformation() {
     if (F.use_empty())
       continue;
 
+    LLVM_DEBUG({
+      dbgs() << "[HostRPC] RPCing function: " << F.getName() << "\n"
+             << F << "\n";
+    });
     FunctionWorkList.insert(&F);
   }
 
@@ -391,10 +411,13 @@ bool HostRPC::recollectInformation() {
 bool HostRPC::run() {
   bool Changed = false;
 
+  LLVM_DEBUG(dbgs() << "[HostRPC] Running Pass\n");
+
   if (!recollectInformation())
     return Changed;
 
   Changed = true;
+
 
   // We add a couple of assumptions to those RPC functions such that AAs will
   // not error out because of unknown implementation of those functions.
@@ -424,7 +447,7 @@ bool HostRPC::run() {
     }
   }
 
-  LLVM_DEBUG(M.dump());
+  //LLVM_DEBUG(M.dump());
 
   registerAAs();
 
@@ -438,6 +461,7 @@ bool HostRPC::run() {
   if (!Changed)
     return Changed;
 
+  // replace all call to the function to a call to the rpc wrapper that have replace it.
   for (auto Itr = CallInstMap.rbegin(); Itr != CallInstMap.rend(); ++Itr) {
     auto *CI = Itr->first;
     auto *NewCI = Itr->second;
@@ -445,6 +469,7 @@ bool HostRPC::run() {
     CI->eraseFromParent();
   }
 
+  // erase all trace of the function in the Module
   for (Function *F : FunctionWorkList)
     if (F->user_empty())
       F->eraseFromParent();
@@ -556,16 +581,21 @@ bool HostRPC::rewriteWithHostRPC(Function *F) {
 
       Value *Operand = CI->getArgOperand(I);
 
+      LLVM_DEBUG({dbgs() << "[HostRPC] [argparse]: Argument: " << I << ": " << *Operand << "\n"; });
+
       // Check if scalar type.
       if (!Operand->getType()->isPointerTy()) {
         AII.emplace_back();
         HandleDirectUse(Operand, AII.back());
         IsConstantArgInfo = IsConstantArgInfo && isa<Constant>(Operand);
+        LLVM_DEBUG({dbgs() << "[HostRPC] [argparse]: Constant: " << *Operand << "\n"; });
         continue;
       }
 
-      if (CheckIfNullPtr(Operand))
+      if (CheckIfNullPtr(Operand)){
+        LLVM_DEBUG({dbgs() << "[HostRPC] [argparse]: Null Ptr: " << *Operand << "\n"; });
         continue;
+      }
 
       auto Pred = [&](Value &Obj) {
         if (CheckIfNullPtr(&Obj))
@@ -592,6 +622,7 @@ bool HostRPC::rewriteWithHostRPC(Function *F) {
                                    : ArgType::OMP_HOST_RPC_ARG_COPY_TOFROM);
         } else if (CheckIfDynAlloc(&Obj)) {
           // We will handle this case at runtime so here we don't do anything.
+          LLVM_DEBUG({dbgs() << "[HostRPC] [argparse]: Dynamic Alloc: " << *Operand << "\n"; });
           return true;
         } else if (isa<AllocaInst>(&Obj)) {
           llvm_unreachable("alloca instruction needs to be handled!");
@@ -607,9 +638,24 @@ bool HostRPC::rewriteWithHostRPC(Function *F) {
         return true;
       };
 
-      auto &AAUO = *A.getOrCreateAAFor<AAUnderlyingObjects>(
-          IRPosition::callsite_argument(*CI, I), nullptr, DepClassTy::NONE);
-      if (!AAUO.forallUnderlyingObjects(Pred))
+      LLVM_DEBUG({
+        dbgs() << "[HostRPC] function rewrite:\n"
+                << "Function: " << *F << "\n"
+                << "Call site: " << *CI << "\n "
+                << "Operand: " << *Operand << "\n";
+      });
+
+      // TODO replace with LLVM functions to not use Attributors.
+      assert(!IRPosition::callsite_argument(*CI, I)
+          .getAnchorScope()->hasFnAttribute(Attribute::OptimizeNone)
+          && "[HostRPC]: Optimize None is not supported");
+
+      const llvm::AAUnderlyingObjects* AAUO =
+        A.getOrCreateAAFor<AAUnderlyingObjects>(
+            IRPosition::callsite_argument(*CI, I));
+
+      LLVM_DEBUG({dbgs() << "[HostRPC] AAUO:" << AAUO << "\n";});
+      if (!AAUO->forallUnderlyingObjects(Pred))
         llvm_unreachable("internal error");
     }
 
@@ -625,22 +671,27 @@ bool HostRPC::rewriteWithHostRPC(Function *F) {
         Value *Next = NullPtr;
         for (auto &AI : AII) {
           Value *AIV = Builder.CreateAlloca(ArgInfoTy);
+
           Value *AIIArg =
               GetElementPtrInst::Create(Int64Ty, AIV, {getConstantInt64(0)});
           Builder.Insert(AIIArg);
           Builder.CreateStore(convertToInt64Ty(AI.BasePtr), AIIArg);
+
           Value *AIIType =
               GetElementPtrInst::Create(Int64Ty, AIV, {getConstantInt64(1)});
           Builder.Insert(AIIType);
           Builder.CreateStore(AI.Type, AIIType);
+
           Value *AIISize =
               GetElementPtrInst::Create(Int64Ty, AIV, {getConstantInt64(2)});
           Builder.Insert(AIISize);
           Builder.CreateStore(AI.Size, AIISize);
+
           Value *AIINext =
               GetElementPtrInst::Create(Int8PtrTy, AIV, {getConstantInt64(3)});
           Builder.Insert(AIINext);
           Builder.CreateStore(Next, AIINext);
+
           Next = AIV;
         }
         Value *AIIV = GetElementPtrInst::Create(Int8PtrTy, ArgInfoVal,
@@ -659,16 +710,25 @@ bool HostRPC::rewriteWithHostRPC(Function *F) {
                                               cast<Constant>(AI.Size), Last});
           auto *GV = new GlobalVariable(
               M, ArgInfoTy, /* isConstant */ true,
-              GlobalValue::LinkageTypes::InternalLinkage, CS);
+              GlobalValue::LinkageTypes::InternalLinkage, CS, "",
+              nullptr, GlobalValue::ThreadLocalMode::NotThreadLocal, 0);
+          // force adress space 0 on AMD GPU
+          // insted of address space 1 for globals
           Last = GV;
         }
-        ArgInfoInitVar.push_back(Last);
+          LLVM_DEBUG({
+            dbgs() << "[HostRPC] ArgInfoInitVar:" << *Last << "\n";
+          });
+          ArgInfoInitVar.push_back(Last);
       }
+
+
       Constant *ArgInfoInit = ConstantArray::get(
           ArrayType::get(Int8PtrTy, NumArgs), ArgInfoInitVar);
       ArgInfoVal = new GlobalVariable(
           M, ArrayType::get(Int8PtrTy, NumArgs), /* isConstant */ true,
-          GlobalValue::LinkageTypes::InternalLinkage, ArgInfoInit, "arg_info");
+          GlobalValue::LinkageTypes::InternalLinkage, ArgInfoInit, "arg_info",
+            nullptr, GlobalValue::ThreadLocalMode::NotThreadLocal, 0);
     }
 
     SmallVector<Value *> Args{ConstantInt::get(Int32Ty, WrapperNumber),
@@ -710,16 +770,24 @@ Function *HostRPC::getDeviceWrapperFunction(StringRef WrapperName, Function *F,
   Value *Desc = nullptr;
   {
     Function *Fn = RFIs[OMPRTL___kmpc_host_rpc_get_desc];
+    LLVM_DEBUG({dbgs() << "[HostRPC] Building: rpc get desc: " << *Fn << "\n"; });
+    for (unsigned i = 0; i < 3; ++i)
+      LLVM_DEBUG({dbgs() << "ParamI: " << *(Fn->getFunctionType()->getParamType(i)) << "\n"; });
+
     Desc = Builder.CreateCall(
-        Fn,
-        {WrapperFn->getArg(0),
-         ConstantInt::get(Int32Ty, WrapperFn->arg_size() - NumArgSkipped),
-         WrapperFn->getArg(1)},
-        "desc");
+      Fn,
+      {
+        WrapperFn->getArg(0),
+        ConstantInt::get(Int32Ty, WrapperFn->arg_size() - NumArgSkipped),
+        WrapperFn->getArg(1)
+      },
+      "desc"
+    );
   }
 
   {
     Function *Fn = RFIs[OMPRTL___kmpc_host_rpc_add_arg];
+    LLVM_DEBUG({dbgs() << "[HostRPC] Building: rpc add arg\n"; });
     for (unsigned I = NumArgSkipped; I < WrapperFn->arg_size(); ++I) {
       Value *V = convertToInt64Ty(WrapperFn->getArg(I));
       Builder.CreateCall(
@@ -727,6 +795,7 @@ Function *HostRPC::getDeviceWrapperFunction(StringRef WrapperName, Function *F,
     }
   }
 
+  LLVM_DEBUG({dbgs() << "[HostRPC] Building: rpc send and wait\n"; });
   Value *RetVal =
       Builder.CreateCall(RFIs[OMPRTL___kmpc_host_rpc_send_and_wait], {Desc});
 
@@ -739,6 +808,8 @@ Function *HostRPC::getDeviceWrapperFunction(StringRef WrapperName, Function *F,
     RetVal = convertFromInt64TyTo(RetVal, RetTy);
 
   Builder.CreateRet(RetVal);
+
+  LLVM_DEBUG({dbgs() << "[HostRPC] Device Wrapper Function:\n" << *WrapperFn; });
 
   return WrapperFn;
 }

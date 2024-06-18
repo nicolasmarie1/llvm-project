@@ -14,10 +14,6 @@
 
 #include "Types.h"
 
-struct FILE;
-extern FILE *stdin;
-extern FILE *stdout;
-extern FILE *stderr;
 
 #ifndef _ASM_GENERIC_ERRNO_BASE_H
 #define _ASM_GENERIC_ERRNO_BASE_H

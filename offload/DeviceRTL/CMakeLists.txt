@@ -102,13 +102,18 @@ set(src_files
   ${source_directory}/Workshare.cpp
 )
 
+# WarpAllocator.cpp is missing from this list
 if (LIBOMPTARGET_DEVICE_BUILTIN_ALLOCATOR)
+  # Use the already buildin allocator of DeviceRTL instead of GPUFirst one,
+  # Does not support rpc call of function argument with pointer to GPU memory
+  # as Allocation informations is not saved.
   list(APPEND src_files ${source_directory}/BuiltinAllocator.cpp)
 elseif (LIBOMPTARGET_GENERIC_ALLOCATOR)
   list(APPEND src_files ${source_directory}/GenericAllocator.cpp)
 else()
   list(APPEND src_files ${source_directory}/TeamAllocator.cpp)
 endif()
+
 
 # We disable the slp vectorizer during the runtime optimization to avoid
 # vectorized accesses to the shared state. Generally, those are "good" but
@@ -139,7 +144,9 @@ set(bc_flags -c -foffload-lto -std=c++17 -fvisibility=hidden
              -I${include_directory}
              -I${devicertl_base_directory}/../include
              ${LIBOMPTARGET_LLVM_INCLUDE_DIRS_DEVICERTL}
+             -I${CMAKE_SOURCE_DIR}/../libc/include
 )
+
 
 if (LIBOMPTARGET_DEVICERTL_HOSTRPC_DEBUG)
   list(APPEND bc_flags "-DHOSTRPC_DEBUG")
@@ -316,6 +323,7 @@ set_target_properties(omptarget.devicertl PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY "${LIBOMPTARGET_LLVM_LIBRARY_INTDIR}"
   LINKER_LANGUAGE CXX
 )
+
 target_link_libraries(omptarget.devicertl PRIVATE omptarget.devicertl.all_objs)
 
 install(TARGETS omptarget.devicertl ARCHIVE DESTINATION ${OFFLOAD_INSTALL_LIBDIR})

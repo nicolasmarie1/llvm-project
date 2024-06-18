@@ -16,6 +16,9 @@
 #include <llvm-libc-types/rpc_opcodes_t.h>
 #include <llvm-libc-types/rpc_port_t.h>
 
+#include <stddef.h>
+#include <stdio.h>
+
 %%public_api()
 
 #endif // LLVM_LIBC_GPU_RPC_H

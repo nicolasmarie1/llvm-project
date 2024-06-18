@@ -45,8 +45,8 @@ struct Descriptor {
   int32_t Id;
   struct Argument *Args;
   int64_t NumArgs;
-  volatile int64_t Status;
-  volatile int64_t ReturnValue;
+  int64_t Status;
+  int64_t ReturnValue;
 
   // The following members will only be used by device.
   void **ArgInfo;

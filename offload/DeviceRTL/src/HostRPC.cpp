@@ -18,6 +18,8 @@
 #include "Utils.h"
 
 #include "llvm/Frontend/OpenMP/OMPDeviceConstants.h"
+#include "llvm-libc-types/rpc_opcodes_t.h"
+#include "llvm-libc-types/rpc_port_t.h"
 
 #ifdef HOSTRPC_DEBUG
 #define DEBUG_PREFIX "host-rpc-device"
@@ -32,15 +34,6 @@ using namespace hostrpc;
 
 using ArgType = llvm::omp::OMPTgtHostRPCArgType;
 
-Descriptor *omptarget_hostrpc_descriptor
-    __attribute__((used, retain, weak, visibility("protected")));
-int32_t *omptarget_hostrpc_futex
-    __attribute__((used, retain, weak, visibility("protected")));
-char *omptarget_hostrpc_memory_buffer
-    __attribute__((used, retain, weak, visibility("protected")));
-size_t omptarget_hostrpc_memory_buffer_size
-    __attribute__((used, retain, weak, visibility("protected")));
-
 #ifdef HOSTRPC_PROFILING
 int32_t HostRPCId;
 double GetDescStart;
@@ -53,32 +46,20 @@ double CopyBackStart;
 double CopyBackEnd;
 #endif
 
+
+// libc rpc functions forward declare:
+// TODO: replace when a proper header exposing device functions is created
+extern "C" {
+  rpc_port_t rpc_open_port(rpc_opcode_t);
+  void rpc_send_n(rpc_port_t *handle, const void *src, size_t size);
+  void rpc_recv_n(rpc_port_t *handle, void *dst, size_t *size);
+  void rpc_close_port(rpc_port_t *handle);
+}
+
+
 namespace {
 size_t HostRPCMemoryBufferCurrentPosition = 0;
 constexpr const size_t Alignment = 16;
-
-// FIXME: For now we only allow one thread requesting host RPC.
-mutex::TicketLock HostRPCLock;
-
-void *HostRPCMemAlloc(size_t Size) {
-  Size = utils::align_up(Size, Alignment);
-
-  if (Size + HostRPCMemoryBufferCurrentPosition <
-      omptarget_hostrpc_memory_buffer_size) {
-    void *R =
-        omptarget_hostrpc_memory_buffer + HostRPCMemoryBufferCurrentPosition;
-    atomic::add(&HostRPCMemoryBufferCurrentPosition, Size, atomic::acq_rel);
-    return R;
-  }
-
-  printf("%s:%d\n", __FILE__, __LINE__);
-  __builtin_trap();
-
-  return nullptr;
-}
-
-// For now we just reset the buffer.
-void HostRPCMemReset() { HostRPCMemoryBufferCurrentPosition = 0; }
 
 static_assert(sizeof(intptr_t) == sizeof(int64_t), "pointer size not match");
 
@@ -108,7 +89,7 @@ void *getMappedPointer(Descriptor *D, void *BasePtr, int64_t Size,
       return utils::advance(MapTable[I].MappedBasePtr, Offset);
 
   MapTable[I].BasePtr = BasePtr;
-  MapTable[I].MappedBasePtr = HostRPCMemAlloc(Size);
+  MapTable[I].MappedBasePtr = malloc(Size);
   MapTable[I].Size = Size;
   MapTable[I].Kind = Kind;
 
@@ -140,10 +121,7 @@ void copybackIfNeeded(Descriptor *D) {
 extern "C" {
 __attribute__((noinline, used)) void *
 __kmpc_host_rpc_get_desc(int32_t CallId, int32_t NumArgs, void *ArgInfo) {
-  assert(omptarget_hostrpc_descriptor && omptarget_hostrpc_futex &&
-         "no host rpc pointer");
 
-  DP("device: stdin=%p, stdout=%p, stderr=%p\n", stdin, stdout, stderr);
   DP("get desc for request (id=%d), NumArgs=%d, ArgInfo=%p.\n", CallId, NumArgs,
      ArgInfo);
 #ifdef HOSTRPC_DEBUG
@@ -154,15 +132,12 @@ __kmpc_host_rpc_get_desc(int32_t CallId, int32_t NumArgs, void *ArgInfo) {
   }
 #endif
 
-  HostRPCLock.lock();
-
 #ifdef HOSTRPC_PROFILING
   HostRPCId = CallId;
   GetDescStart = omp_get_wtime();
 #endif
 
-  // TODO: change it after we support a queue-like data structure.
-  Descriptor *D = omptarget_hostrpc_descriptor;
+  Descriptor *D = (Descriptor *) malloc(sizeof(Descriptor));
 
   D->Id = CallId;
   D->ArgInfo = reinterpret_cast<void **>(ArgInfo);
@@ -170,8 +145,8 @@ __kmpc_host_rpc_get_desc(int32_t CallId, int32_t NumArgs, void *ArgInfo) {
   D->Status = EXEC_STAT_CREATED;
   D->ReturnValue = 0;
   D->Args =
-      reinterpret_cast<Argument *>(HostRPCMemAlloc(sizeof(Argument) * NumArgs));
-  D->ArgMap = HostRPCMemAlloc(sizeof(HostRPCPointerMapEntry) * NumArgs);
+      reinterpret_cast<Argument *>(malloc(sizeof(Argument) * NumArgs));
+  D->ArgMap = malloc(sizeof(HostRPCPointerMapEntry) * NumArgs);
 
   assert(!NumArgs || (D->Args && D->ArgMap) && "out of host rpc memory!");
 
@@ -208,15 +183,6 @@ __kmpc_host_rpc_add_arg(void *Desc, int64_t ArgVal, int32_t ArgNum) {
   }
 
   void *ArgPtr = reinterpret_cast<void *>(ArgVal);
-
-  if (ArgPtr == stdin || ArgPtr == stdout || ArgPtr == stderr) {
-    ArgInDesc.Value = ArgVal;
-    ArgInDesc.ArgType = Type::ARG_POINTER;
-
-    DP("arg (no=%d) is stdin/stdout/stderr, done.\n", ArgNum);
-
-    return;
-  }
 
   const auto *AI = reinterpret_cast<HostRPCArgInfo *>(D->ArgInfo[ArgNum]);
 
@@ -299,7 +265,7 @@ __kmpc_host_rpc_add_arg(void *Desc, int64_t ArgVal, int32_t ArgNum) {
 
 __attribute__((noinline, used)) int64_t
 __kmpc_host_rpc_send_and_wait(void *Desc) {
-  auto *D = reinterpret_cast<Descriptor *>(Desc);
+  Descriptor *D = reinterpret_cast<Descriptor *>(Desc);
   int32_t Id = D->Id;
 
 #ifdef HOSTRPC_PROFILING
@@ -307,22 +273,61 @@ __kmpc_host_rpc_send_and_wait(void *Desc) {
   IssueAndWaitStart = omp_get_wtime();
 #endif
 
-  atomic::add(omptarget_hostrpc_futex, 1U, atomic::acq_rel);
 
-  // A system fence is required to make sure futex on the host is also
-  // updated if USM is supported.
-  fence::system(atomic::seq_cst);
 
-  DP("sent request (id=%d) to host. waiting for finish.\n", Id);
+//  // WORKING back & forth of an uint64_t
+//
+//  printf("[HostRPC] [Device]: Start \n");
+//
+//  rpc_port_t port = rpc_open_port(RPC_GPUFIRST);
+//
+//  uint64_t size_send = sizeof(uint64_t);
+//  void *buf_send = malloc(size_send);
+//  *((uint64_t *) buf_send) = 123456789;
+//
+//  printf("[Hostrpc] [Device] [SEND]: %lu\n", *((uint64_t *) buf_send));
+//  printf("[HostRPC] [Device] [SEND] Size: %lu\n", size_send);
+//
+//  rpc_send_n(&port, buf_send, size_send);
+//
+//
+//  uint64_t size_recv = sizeof(uint64_t);
+//  void *buf_recv = malloc(size_recv);
+//
+//  rpc_recv_n(&port, buf_recv, &size_recv);
+//
+//  printf("[HostRPC] [Device] [RECV]: %lu\n", *((uint64_t *) buf_recv));
+//  printf("[HostRPC] [Device] [RECV] Size: %lu\n", size_recv);
+//
+//  rpc_close_port(&port);
+//
+//  assert(size_send == size_recv);
+//
+//  printf("[HostRPC] [Device]: End \n");
+//
+//  // END of working part
 
-  unsigned NS = 8;
 
-  while (atomic::addSys(omptarget_hostrpc_futex, 0)) {
-    asm volatile("nanosleep.u32 %0;" : : "r"(NS));
-    // if (NS < 64)
-    //   NS *= 2;
-    // fence::system(atomic::seq_cst);
-  }
+  rpc_port_t port = rpc_open_port(RPC_GPUFIRST);
+
+  Argument *Args = D->Args;
+
+  rpc_send_n(&port, D, sizeof(Descriptor));
+  rpc_send_n(&port, Args, sizeof(Argument) * D->NumArgs);
+
+  // CPU is calling the function here
+
+  // unuse
+  uint64_t size_recv = 0;
+
+  rpc_recv_n(&port, D, &size_recv);
+  rpc_recv_n(&port, Args, &size_recv);
+
+  D->Args = Args;
+
+  (void) size_recv;
+  rpc_close_port(&port);
+
 
 #ifdef HOSTRPC_PROFILING
   IssueAndWaitEnd = omp_get_wtime();
@@ -348,11 +353,14 @@ __kmpc_host_rpc_send_and_wait(void *Desc) {
   CopyBackEnd = omp_get_wtime();
 #endif
 
-  HostRPCMemReset();
-
-  // We can unlock now as we already get all temporary part.
-  // TODO: If we have a queue, we don't need this step.
-  HostRPCLock.unlock();
+  // free memory allocated for the call
+  HostRPCPointerMapEntry *MapTable = reinterpret_cast<HostRPCPointerMapEntry *>(D->ArgMap);
+  for(int i = 0; i < D->NumArgs && MapTable[i].BasePtr; ++i){
+    free(MapTable[i].MappedBasePtr);
+  }
+  free(D->Args);
+  free(D->ArgMap);
+  free(D);
 
   DP("request (id=%d) is done with return code=%lx.\n", Id, Ret);
 
@@ -399,7 +407,7 @@ __kmpc_launch_parallel_51_kernel(const char *name, int32_t gtid,
   ArgInfoArray[4].Size = sizeof(void *) * nargs;
   void *Args = nullptr;
   if (nargs) {
-    Args = HostRPCMemAlloc(ArgInfoArray[4].Size);
+    Args = malloc(ArgInfoArray[4].Size);
     __builtin_memcpy(Args, args, ArgInfoArray[4].Size);
   }
   ArgInfoArray[4].BasePtr = Args;

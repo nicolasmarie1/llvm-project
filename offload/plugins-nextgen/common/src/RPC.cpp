@@ -15,11 +15,44 @@
 #if defined(LIBOMPTARGET_RPC_SUPPORT)
 #include "llvm-libc-types/rpc_opcodes_t.h"
 #include "llvmlibc_rpc_server.h"
+
+#include "HostRPC.h"
+#include "llvm/Support/DynamicLibrary.h"
 #endif
 
 using namespace llvm;
 using namespace omp;
 using namespace target;
+
+#ifdef LIBOMPTARGET_RPC_SUPPORT
+// GPUFirst Host Function Wrapper Invoker
+class HostRPCInvokerWrapper {
+  void (*Invoker)(int32_t, void *) = nullptr;
+  std::unique_ptr<sys::DynamicLibrary> DL;
+  std::once_flag Flag;
+
+  void initInvoker() {
+    std::string ErrMsg;
+    DL = std::make_unique<sys::DynamicLibrary>(
+        sys::DynamicLibrary::getPermanentLibrary(nullptr, &ErrMsg));
+
+    assert(DL->isValid() && "invalid DL");
+    *((void **)&Invoker) =
+        DL->getAddressOfSymbol("__kmpc_host_rpc_invoke_host_wrapper");
+    assert(Invoker && "Invoker is nullptr");
+  }
+
+public:
+  void invoke(int32_t CallNo, void *Desc) {
+    std::call_once(Flag, &HostRPCInvokerWrapper::initInvoker, this);
+    Invoker(CallNo, Desc);
+  }
+};
+
+HostRPCInvokerWrapper *Invoker;
+// GPUFirst END
+#endif
+
 
 RPCServerTy::RPCServerTy(plugin::GenericPluginTy &Plugin)
     : Handles(Plugin.getNumDevices()) {}
@@ -88,6 +121,75 @@ Error RPCServerTy::initDevice(plugin::GenericDeviceTy &Device,
     return plugin::Plugin::error(
         "Failed to register RPC free handler for device %d: %d\n",
         Device.getDeviceId(), Err);
+
+  // GPUFirst
+  // Register custom opcode handler for gpu first
+  auto GPUFirstHandler = [](rpc_port_t port, void *Data) {
+
+  //    printf("[HostRPC] [Host]: GPUFirstHandler\n");
+  //  // WORKING back & forth of an uint64_t
+  //
+  //  printf("[HostRPC] [Host]: Start \n");
+  //
+  //  uint64_t size_recv = 0;
+  //  void *buf_recv = nullptr;
+  //
+  //  rpc_recv_n(port, &buf_recv, &size_recv,
+  //    [](uint64_t size, void* data){ return malloc(size); }, nullptr);
+  //
+  //  printf("[HostRPC] [Host] [RECV]: %lu\n", *((uint64_t *) buf_recv));
+  //  printf("[HostRPC] [Host] [RECV] Size: %lu\n", size_recv);
+  //
+  //  uint64_t size_send = sizeof(uint64_t);
+  //  void *buf_send = malloc(size_send);
+  //  *((uint64_t *) buf_send) = 987654321;
+  //
+  //  printf("[Hostrpc] [Host] [SEND]: %lu\n", *((uint64_t *) buf_send));
+  //  printf("[HostRPC] [Host] [SEND] Size: %lu\n", size_send);
+  //
+  //  rpc_send_n(port, &buf_send, &size_send);
+  //
+  //  printf("[HostRPC] [Host]: End \n");
+  //
+  //  // END of working part
+
+    auto _rpc_recv_n = [](rpc_port_t *handle, void **dst, size_t *size){
+      rpc_recv_n(*handle, dst, size,
+        [](uint64_t size, void* data){ return malloc(size); },
+        nullptr);
+    };
+    auto _rpc_send_n = [](rpc_port_t *handle, void *src, size_t size){
+      rpc_send_n(*handle, &src, &size);
+    };
+
+
+    uint64_t size_recv = 0;
+
+    hostrpc::Descriptor *D = nullptr;
+    hostrpc::Argument *Args = nullptr;
+
+    _rpc_recv_n(&port, reinterpret_cast<void **>(&D), &size_recv);
+    _rpc_recv_n(&port, reinterpret_cast<void **>(&Args), &size_recv);
+
+    D->Args = Args;
+
+    if(Invoker == nullptr)
+      Invoker = new HostRPCInvokerWrapper();
+    Invoker->invoke(D->Id, D);
+
+    _rpc_send_n(&port, D, sizeof(hostrpc::Descriptor));
+    _rpc_send_n(&port, D->Args, sizeof(hostrpc::Argument) * D->NumArgs);
+
+    free(D->Args);
+    free(D);
+
+  };
+  if (rpc_status_t Err =
+          rpc_register_callback(RPCDevice, RPC_GPUFIRST, GPUFirstHandler, &Invoker))
+    return plugin::Plugin::error(
+        "Failed to register RPC GPU First handler for device %d: %d\n", Device.getDeviceId(),
+        Err);
+  // GPUFirst END
 
   // Get the address of the RPC client from the device.
   void *ClientPtr;
