@@ -225,7 +225,7 @@ inline void register_rpc_callbacks(rpc_device_t device) {
 
   // Register the stream test handler.
   rpc_register_callback(
-      device_id, static_cast<rpc_opcode_t>(RPC_TEST_EXTERNAL),
+      device, static_cast<rpc_opcode_t>(RPC_TEST_EXTERNAL),
       [](rpc_port_t port, void *data) {
         uint64_t sizes[lane_size] = {0};
         void *dst[lane_size] = {nullptr};
