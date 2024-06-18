@@ -2623,7 +2623,7 @@ void CodeGenFunction::EmitParmDecl(const VarDecl &D, ParamValue Arg,
       // Indirect argument is in alloca address space, which may be different
       // from the default address space.
       auto AllocaAS = CGM.getASTAllocaAddressSpace();
-      auto *V = DeclPtr.getRawPointer(*this);
+      auto *V = DeclPtr.emitRawPointer(*this);
       AllocaPtr = RawAddress(V, DeclPtr.getElementType(), DeclPtr.getAlignment());
       auto SrcLangAS = getLangOpts().OpenCL ? LangAS::opencl_private : AllocaAS;
       auto DestLangAS =
