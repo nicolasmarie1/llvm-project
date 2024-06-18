@@ -740,7 +740,6 @@ std::unique_ptr<lto::LTO> createHostRPCLTO(StringRef HostTriple) {
   // Conf.MAttrs = Features;
   Conf.CGOptLevel = *CodeGenOpt::getLevel(3);
   Conf.OptLevel = 3;
-  Conf.UseDefaultPipeline = true;
   Conf.DefaultTriple = Triple.getTriple();
 
   LTOError = false;
