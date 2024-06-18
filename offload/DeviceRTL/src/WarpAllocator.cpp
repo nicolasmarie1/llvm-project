@@ -21,11 +21,13 @@
 
 using namespace ompx;
 
-char *CONSTANT(omptarget_device_heap_buffer)
-    __attribute__((used, retain, weak, visibility("protected")));
-
-size_t CONSTANT(omptarget_device_heap_size)
-    __attribute__((used, retain, weak, visibility("protected")));
+[[gnu::used, gnu::retain, gnu::weak,
+  gnu::visibility(
+      "protected")]] DeviceMemoryPoolTy __omp_rtl_device_memory_pool;
+[[gnu::used, gnu::retain, gnu::weak,
+  gnu::visibility("protected")]] DeviceMemoryPoolTrackingTy
+    __omp_rtl_device_memory_pool_tracker;
+// TODO: implement Device Debug Allocation Tracker
 
 namespace {
 constexpr const size_t Alignment = 16;
@@ -92,7 +94,7 @@ template <int32_t WARP_SIZE> struct WarpAllocator {
         (mapping::getThreadIdInBlock() || mapping::getBlockId()))
       return;
 
-    size_t HeapSize = omptarget_device_heap_size;
+    size_t HeapSize = __omp_rtl_device_memory_pool.Size;
     size_t FirstThreadHeapSize = HeapSize * FirstThreadRatio / 100;
     FirstThreadHeapSize = utils::align_down(FirstThreadHeapSize, Alignment);
     size_t OtherThreadHeapSize =
@@ -102,7 +104,7 @@ template <int32_t WARP_SIZE> struct WarpAllocator {
     for (int I = 0; I < WARP_SIZE; ++I) {
       Entries[I] = nullptr;
       size_t PrivateOffset = OtherThreadHeapSize * I + FirstThreadHeapSize;
-      Limits[I] = omptarget_device_heap_buffer + PrivateOffset;
+      Limits[I] = reinterpret_cast<char *>(__omp_rtl_device_memory_pool.Ptr) + PrivateOffset;
     }
   }
 
@@ -160,8 +162,8 @@ template <int32_t WARP_SIZE> struct WarpAllocator {
   }
 
   memory::MemoryAllocationInfo getMemoryAllocationInfo(void *P) {
-    if (!utils::isInRange(P, omptarget_device_heap_buffer,
-                          omptarget_device_heap_size))
+    if (!utils::isInRange(P, reinterpret_cast<char *>(__omp_rtl_device_memory_pool.Ptr),
+                          __omp_rtl_device_memory_pool.Size))
       return {};
 
     auto TIdInWarp = mapping::getThreadIdInWarp();
@@ -190,7 +192,7 @@ template <int32_t WARP_SIZE> struct WarpAllocator {
 
 private:
   char *getBlockBegin(int32_t TIdInWarp) const {
-    return TIdInWarp ? Limits[TIdInWarp - 1] : omptarget_device_heap_buffer;
+    return TIdInWarp ? Limits[TIdInWarp - 1] : reinterpret_cast<char *>(__omp_rtl_device_memory_pool.Ptr);
   }
   char *getBlockEnd(int32_t TIdInWarp) const { return Limits[TIdInWarp]; }
 

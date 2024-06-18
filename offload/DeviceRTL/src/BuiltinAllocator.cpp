@@ -37,4 +37,8 @@ void *realloc(void *ptr, size_t new_size) {
 }
 }
 
+extern "C" {
+  void __kmpc_target_init_allocator() { return; }
+}
+
 #pragma omp end declare target

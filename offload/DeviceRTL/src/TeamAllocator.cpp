@@ -21,11 +21,13 @@
 
 using namespace ompx;
 
-char *CONSTANT(omptarget_device_heap_buffer)
-    __attribute__((used, retain, weak, visibility("protected")));
-
-size_t CONSTANT(omptarget_device_heap_size)
-    __attribute__((used, retain, weak, visibility("protected")));
+[[gnu::used, gnu::retain, gnu::weak,
+  gnu::visibility(
+      "protected")]] DeviceMemoryPoolTy __omp_rtl_device_memory_pool;
+[[gnu::used, gnu::retain, gnu::weak,
+  gnu::visibility("protected")]] DeviceMemoryPoolTrackingTy
+    __omp_rtl_device_memory_pool_tracker;
+// TODO: implement Device Debug Allocation Tracker
 
 namespace {
 constexpr const size_t Alignment = 16;
@@ -92,7 +94,7 @@ template <uint32_t WARP_SIZE, uint32_t TEAM_SIZE> struct WarpAllocator {
         (mapping::getThreadIdInBlock() || mapping::getBlockIdInKernel()))
       return;
 
-    size_t HeapSize = omptarget_device_heap_size;
+    size_t HeapSize = __omp_rtl_device_memory_pool.Size;
 
     FirstThreadHeapSize = HeapSize * FirstThreadRatio / 100;
     FirstThreadHeapSize = utils::align_down(FirstThreadHeapSize, Alignment);
@@ -104,7 +106,7 @@ template <uint32_t WARP_SIZE, uint32_t TEAM_SIZE> struct WarpAllocator {
     TeamHeapSize = utils::align_down(TeamHeapSize, Alignment);
     FirstTeamSize = TeamHeapSize;
 
-    char *LastLimit = omptarget_device_heap_buffer;
+    char *LastLimit = reinterpret_cast<char *>(__omp_rtl_device_memory_pool.Ptr);
     for (int I = 0; I < WARP_SIZE; ++I) {
       for (int J = 0; J < TEAM_SIZE; ++J) {
         Entries[I][J] = nullptr;
@@ -173,8 +175,8 @@ template <uint32_t WARP_SIZE, uint32_t TEAM_SIZE> struct WarpAllocator {
   }
 
   memory::MemoryAllocationInfo getMemoryAllocationInfo(void *P) {
-    if (!utils::isInRange(P, omptarget_device_heap_buffer,
-                          omptarget_device_heap_size))
+    if (!utils::isInRange(P, reinterpret_cast<char *>(__omp_rtl_device_memory_pool.Ptr),
+                          __omp_rtl_device_memory_pool.Size))
       return {};
 
     auto TeamSlot = getTeamSlot();
@@ -192,14 +194,16 @@ template <uint32_t WARP_SIZE, uint32_t TEAM_SIZE> struct WarpAllocator {
           return {};
         if (E->getEndPtr() <= P)
           return {};
-        do {
+        bool isFirst = false;
+        while (!isFirst) {
           if (E->getUserPtr() <= P && P < E->getEndPtr()) {
             if (!E->isUsed())
               return {};
             return {E->getUserPtr(), E->getUserSize()};
           }
+          isFirst = E->isFirst();
           E = E->getPrev();
-        } while (!E->isFirst());
+        }
       }
     }
     return {};
@@ -211,7 +215,7 @@ private:
       return Limits[TIdInWarp][TeamSlot - 1];
     if (TIdInWarp)
       return Limits[TIdInWarp - 1][TEAM_SIZE - 1];
-    return omptarget_device_heap_buffer;
+    return reinterpret_cast<char *>(__omp_rtl_device_memory_pool.Ptr);
   }
   char *getBlockEnd(int32_t TIdInWarp, int32_t TeamSlot) const {
     return Limits[TIdInWarp][TeamSlot];

@@ -18,11 +18,13 @@
 
 using namespace ompx;
 
-char *CONSTANT(omptarget_device_heap_buffer)
-    __attribute__((used, retain, weak, visibility("protected")));
-
-size_t CONSTANT(omptarget_device_heap_size)
-    __attribute__((used, retain, weak, visibility("protected")));
+[[gnu::used, gnu::retain, gnu::weak,
+  gnu::visibility(
+      "protected")]] DeviceMemoryPoolTy __omp_rtl_device_memory_pool;
+[[gnu::used, gnu::retain, gnu::weak,
+  gnu::visibility("protected")]] DeviceMemoryPoolTrackingTy
+    __omp_rtl_device_memory_pool_tracker;
+// TODO: implement Device Debug Allocation Tracker
 
 namespace {
 size_t HeapCurPos = 0;
@@ -250,8 +252,8 @@ void *malloc(size_t Size) {
   {
     mutex::LockGuard LG(HeapLock);
 
-    if (Size + HeapCurPos < omptarget_device_heap_size) {
-      void *R = omptarget_device_heap_buffer + HeapCurPos;
+    if (Size + HeapCurPos < __omp_rtl_device_memory_pool.Size) {
+      void *R = reinterpret_cast<char *>(__omp_rtl_device_memory_pool.Ptr) + HeapCurPos;
       (void)atomic::add(&HeapCurPos, Size, atomic::acq_rel);
       MD = AllocationMetadata::getFromAddr(R);
     }
