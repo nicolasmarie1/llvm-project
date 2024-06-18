@@ -122,8 +122,6 @@ uint32_t atomicExchange(uint32_t *Address, uint32_t Val,
 }
 ///}
 
-int32_t atomicAddSys(int32_t *Address, uint32_t Val);
-
 // Forward declarations defined to be defined for AMDGCN and NVPTX.
 uint32_t atomicInc(uint32_t *A, uint32_t V, atomic::OrderingTy Ordering,
                    atomic::MemScopeTy MemScope);
@@ -335,11 +333,14 @@ void setCriticalLock(omp_lock_t *Lock) {
 
 uint32_t atomicInc(uint32_t *Address, uint32_t Val, atomic::OrderingTy Ordering,
                    atomic::MemScopeTy MemScope) {
-  return __nvvm_atom_inc_gen_ui(Address, Val);
-}
-
-int32_t atomicAddSys(int32_t *Address, int32_t Val) {
-  return __nvvm_atom_sys_add_gen_i(Address, Val);
+  switch(MemScope) {
+  case atomic::MemScopeTy::all:
+    return __nvvm_atom_sys_inc_gen_ui(Address, Val);
+  case atomic::MemScopeTy::device:
+    return __nvvm_atom_inc_gen_ui(Address, Val);
+  case atomic::MemScopeTy::cgroup:
+    return __nvvm_atom_cta_inc_gen_ui(Address, Val);
+  }
 }
 
 void namedBarrierInit() {}
@@ -514,10 +515,6 @@ uint32_t atomic::inc(uint32_t *Addr, uint32_t V, atomic::OrderingTy Ordering,
 void unsetCriticalLock(omp_lock_t *Lock) { impl::unsetLock(Lock); }
 
 void setCriticalLock(omp_lock_t *Lock) { impl::setLock(Lock); }
-
-int32_t atomic::addSys(int32_t *Addr, int32_t Val) {
-  return impl::atomicAddSys(Addr, Val);
-}
 
 void mutex::TicketLock::lock() {
   uint64_t MyTicket = atomic::add(&NextTicket, 1, atomic::seq_cst);
