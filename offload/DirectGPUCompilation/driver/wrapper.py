@@ -17,7 +17,7 @@ def print_version():
         sys.exit(cp.returncode)
 
 
-def compile_loader(loader_name, targets, verbose, dry_run):
+def compile_loader(loader_name, args, targets, verbose, dry_run):
     cmd = [
         "clang",
         "-c",
@@ -32,6 +32,7 @@ def compile_loader(loader_name, targets, verbose, dry_run):
             cmd.append("--offload-arch={}".format(arch))
     else:
         cmd.append("--offload-arch=native")
+    cmd += args
     cmd.append(os.path.join(cwd, "Main.c"))
     if verbose:
         print(" ".join(cmd), file=sys.stderr)
@@ -70,7 +71,7 @@ def invoke_clang(is_cpp, args, targets, verbose, dry_run):
         cmd.append("--offload-arch=native")
     cmd += args
     if verbose:
-        print(" ".join(cmd))
+        print(" ".join(cmd), file=sys.stderr)
     if dry_run:
         print(" ".join(cmd))
         return
@@ -83,6 +84,7 @@ def run(is_cpp=False):
     parser = argparse.ArgumentParser(
         prog="clang-gpu", description="clang LLVM GPU compiler"
     )
+    # should be changed, this prevent call with -ccc-print-phases
     parser.add_argument(
         "-c",
         action="store_true",
@@ -130,7 +132,7 @@ def run(is_cpp=False):
     if not args.c:
         tf = tempfile.NamedTemporaryFile()
         loader_name = "{}.o".format(tf.name)
-        compile_loader(loader_name, args.offload_arch, args.v, dry_run)
+        compile_loader(loader_name, ["-O1"], args.offload_arch, args.v, dry_run)
         fwd_args.append(loader_name)
         temp_files.append(loader_name)
 
