@@ -74,7 +74,7 @@ static constexpr const char *InternalPrefix[] = {
     "__kmp", "llvm.",        "nvm.",
     "omp_",  "vprintf",      "malloc",
     "free",  "__keep_alive", "__llvm_omp_vprintf",
-    "rpc_"
+    "rpc_", "MPI_"
 };
 
 bool isInternalFunction(Function &F) {
@@ -770,7 +770,7 @@ Function *HostRPC::getDeviceWrapperFunction(StringRef WrapperName, Function *F,
   Value *Desc = nullptr;
   {
     Function *Fn = RFIs[OMPRTL___kmpc_host_rpc_get_desc];
-    LLVM_DEBUG({dbgs() << "[HostRPC] Building: rpc get desc: " << *Fn << "\n"; });
+    LLVM_DEBUG({dbgs() << "[HostRPC] Building: rpc get desc: " << Fn->getName() << "\n"; });
     for (unsigned i = 0; i < 3; ++i)
       LLVM_DEBUG({dbgs() << "ParamI: " << *(Fn->getFunctionType()->getParamType(i)) << "\n"; });
 

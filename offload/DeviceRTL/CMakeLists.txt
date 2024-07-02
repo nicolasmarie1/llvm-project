@@ -82,6 +82,7 @@ set(include_files
   ${include_directory}/Synchronization.h
   ${include_directory}/Types.h
   ${include_directory}/Utils.h
+  ${include_directory}/Mpi.h
 )
 
 set(src_files
@@ -100,6 +101,7 @@ set(src_files
   ${source_directory}/Tasking.cpp
   ${source_directory}/Utils.cpp
   ${source_directory}/Workshare.cpp
+  ${source_directory}/Mpi.cpp
 )
 
 # WarpAllocator.cpp is missing from this list

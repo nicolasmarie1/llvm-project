@@ -70,3 +70,6 @@ strtoul
 time
 tolower
 strcasecmp
+
+MPI_*
+

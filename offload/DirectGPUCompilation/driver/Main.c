@@ -10,6 +10,8 @@
 extern int __user_main(int, char *[]);
 extern void __kmpc_target_init_allocator(void);
 
+#define TEAM_LIMIT 20
+
 #ifdef SINGLE_THREAD_EXECUTION
 #define THREAD_LIMIT 1
 #else
@@ -29,7 +31,7 @@ int main(int argc, char *argv[]) {
 #pragma omp target teams num_teams(1) thread_limit(1)
   { __kmpc_target_init_allocator(); }
 
-#pragma omp target teams num_teams(1) thread_limit(THREAD_LIMIT)
+#pragma omp target teams num_teams(TEAM_LIMIT) thread_limit(THREAD_LIMIT) // 214 max
   {
     Ret = __user_main(argc, argv);
   }

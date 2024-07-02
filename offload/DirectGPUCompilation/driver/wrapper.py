@@ -44,7 +44,7 @@ def compile_loader(loader_name, args, targets, verbose, dry_run):
         sys.exit(cp.returncode)
 
 
-def invoke_clang(is_cpp, args, targets, verbose, dry_run):
+def invoke_clang(is_cpp, is_mpi, args, targets, verbose, dry_run):
     cmd = [
         "clang++" if is_cpp else "clang",
         "-fopenmp",
@@ -53,6 +53,8 @@ def invoke_clang(is_cpp, args, targets, verbose, dry_run):
         "-fopenmp-globalize-to-global-space",
         "-include",
         os.path.join(cwd, "UserWrapper.h"),
+        "-include" if is_mpi else "",
+        os.path.join(cwd, "mpi.h") if is_mpi else "",
         "--save-temps",
         "-rdynamic",
         "-mllvm",
@@ -80,7 +82,7 @@ def invoke_clang(is_cpp, args, targets, verbose, dry_run):
         sys.exit(cp.returncode)
 
 
-def run(is_cpp=False):
+def run(is_cpp=False, is_mpi=False):
     parser = argparse.ArgumentParser(
         prog="clang-gpu", description="clang LLVM GPU compiler"
     )
@@ -136,7 +138,7 @@ def run(is_cpp=False):
         fwd_args.append(loader_name)
         temp_files.append(loader_name)
 
-    invoke_clang(is_cpp, fwd_args, args.offload_arch, args.v, dry_run)
+    invoke_clang(is_cpp, is_mpi, fwd_args, args.offload_arch, args.v, dry_run)
 
     for f in temp_files:
         if os.path.isfile(f):

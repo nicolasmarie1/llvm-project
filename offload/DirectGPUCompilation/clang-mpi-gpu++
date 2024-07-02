@@ -5,7 +5,7 @@ from driver.wrapper import run
 
 
 def main():
-    run(is_cpp=False, is_mpi=False)
+    run(is_cpp=True, is_mpi=True)
 
 
 if __name__ == "__main__":
