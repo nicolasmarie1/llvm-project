@@ -173,8 +173,6 @@ public:
 
   TicketLock(const TicketLock &) = delete;
 
-  void debugprint();
-
   void lock();
 
   void unlock();

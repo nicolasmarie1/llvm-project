@@ -528,9 +528,6 @@ void mutex::TicketLock::unlock() {
   atomic::add(&NowServing, 1, atomic::seq_cst);
 }
 
-void mutex::TicketLock::debugprint(){
-  printf("Nowserving(%lu), NextTicket(%lu)\n", NowServing, NextTicket);
-}
 
 extern "C" {
 void __kmpc_ordered(IdentTy *Loc, int32_t TId) {}
