@@ -83,6 +83,8 @@ inline void *operator new(__SIZE_TYPE__ size) {
 
 inline void *operator new[](__SIZE_TYPE__ size) { return ::operator new(size); }
 
+inline void *operator new(__SIZE_TYPE__ size, void *ptr) { return ptr; }
+
 inline void operator delete(void *ptr)OPENMP_NOEXCEPT { ::free(ptr); }
 
 inline void operator delete[](void *ptr) OPENMP_NOEXCEPT {

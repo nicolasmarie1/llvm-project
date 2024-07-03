@@ -5,15 +5,15 @@
 #include "Interface.h"
 #include "Memory.h"
 #include "Debug.h"
+#include "LibC.h"
 
 #include "Mpi.h"
 
-// TODO; replace with libc headers
-extern "C" {
-  void *memcpy(void *dest, const void *src, size_t n);
-}
+//using namespace ompx;
 
-using namespace ompx;
+// forward declaration of new
+inline void *operator new(__SIZE_TYPE__ size, void *ptr) { return ptr; }
+
 namespace mpiutils {
 
 template <typename T>
@@ -48,7 +48,7 @@ public:
 private:
   T *Head = nullptr;
   T *Tail = nullptr;
-  mutex::TicketLock listlock;
+  ompx::mutex::TicketLock listlock;
 
   void insertImpl(T *Prev, T *Node) {
     lock();
@@ -164,15 +164,16 @@ namespace impl {
 void yield(void){
   // split kernel here
   //__ompx_split();
+  __builtin_amdgcn_s_sleep(1);
 }
 
 void barrier(uint32_t *counter, uint32_t *gen_counter, uint32_t size){
-  int previous_gen = atomic::load(gen_counter, atomic::seq_cst);
-  int current = atomic::inc(counter, size - 1,
-                  atomic::seq_cst, atomic::MemScopeTy::device);
+  int previous_gen = ompx::atomic::load(gen_counter, ompx::atomic::seq_cst);
+  int current = ompx::atomic::inc(counter, size - 1,
+                  ompx::atomic::seq_cst, ompx::atomic::MemScopeTy::device);
   if (current + 1 == size)
-    atomic::add(gen_counter, 1, atomic::seq_cst);
-  while(atomic::load(gen_counter, atomic::seq_cst) <= previous_gen){
+    ompx::atomic::add(gen_counter, 1, ompx::atomic::seq_cst);
+  while(ompx::atomic::load(gen_counter, ompx::atomic::seq_cst) <= previous_gen){
     yield();
   }
 }
@@ -283,7 +284,7 @@ void mpi_req_free(struct MPI_Request_s **req){
 
 bool mpi_msg_test(struct MPI_Message_s *msg)
 {
-  return atomic::load(&msg->status, atomic::seq_cst) == 1;
+  return ompx::atomic::load(&msg->status, ompx::atomic::seq_cst) == 1;
 }
 
 void mpi_msg_wait(struct MPI_Message_s *msg)
@@ -312,7 +313,7 @@ struct MPI_Message_s *mpi_send(
   msg->rank       = send_rank;
   msg->tag        = tag;
   msg->buffered   = buffered;
-  atomic::store(&msg->status, 0, atomic::seq_cst);
+  ompx::atomic::store(&msg->status, 0, ompx::atomic::seq_cst);
 
   if (buffered){
     msg->buf_data = malloc(data_size);
@@ -405,7 +406,7 @@ void __mpi_recv_do(struct MPI_Message_s *msg, void *buf, MPI_Status *status)
   if (msg->buffered)
     mpi_msg_free(msg);
   else
-    atomic::store(&msg->status, 1, atomic::seq_cst);
+    ompx::atomic::store(&msg->status, 1, ompx::atomic::seq_cst);
 }
 
 bool mpi_recv_test(void *buf, int count, MPI_Datatype datatype,
@@ -560,7 +561,7 @@ int MPI_Init(int *argc, char **argv){
           omp_get_num_teams());
 
   MPI_COMM_WORLD->ranks[omp_get_team_num()] = rank;
-  MPI_COMM_WORLD->messagebox[rank] = mpiutils::LinkList<struct MPI_Message_s>();
+  new (&MPI_COMM_WORLD->messagebox[rank]) mpiutils::LinkList<struct MPI_Message_s>();
 
   impl::barrier(&global_counter, &global_generation_counter,
           omp_get_num_teams());
