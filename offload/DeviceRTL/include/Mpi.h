@@ -59,8 +59,8 @@ enum MPI_Datatype_e {
 typedef enum MPI_Datatype_e MPI_Datatype;
 
 struct MPI_Status_s {
-  uint32_t MPI_SOURCE;
-  int32_t MPI_TAG;
+  int MPI_SOURCE;
+  int MPI_TAG;
   int MPI_ERROR;
 };
 typedef struct MPI_Status_s MPI_Status;
@@ -70,9 +70,16 @@ typedef struct MPI_Request_s *MPI_Request;
 //const MPI_Status MPI_STATUS_IGNORE;
 //const MPI_Status MPI_STATUSES_IGNORE;
 
-int MPI_ANY_SOURCE = -1;
-int MPI_ANY_TAG = -1;
+// global variables
+const int MPI_ANY_SOURCE = -1;
+const int MPI_ANY_TAG = -1;
+const int MPI_SUCCESS = 0;
 
+MPI_Status MPI_STATUS_IGNORE;
+MPI_Status MPI_STATUSES_IGNORE;
+MPI_Request MPI_REQUEST_NULL = 0; // nullptr in cpp and NULL in c
+
+// Common  functions
 int MPI_Init(int *argc, char **argv);
 int MPI_Barrier(MPI_Comm comm);
 int MPI_Finalize(void);
@@ -84,31 +91,31 @@ int MPI_Type_size(MPI_Datatype datatype, int *size);
 
 // Blocking Comm
 int MPI_Send(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm);
-int MPI_Rsend(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm);
+//int MPI_Rsend(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm);
 int MPI_Ssend(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm);
 int MPI_Bsend(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm);
 int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status *status);
 
 // Non Blocking Comm
 int MPI_Isend(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm, MPI_Request *request);
-int MPI_Irsend(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm, MPI_Request *request);
+//int MPI_Irsend(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm, MPI_Request *request);
 int MPI_Issend(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm, MPI_Request *request);
 int MPI_Ibsend(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm, MPI_Request *request);
 int MPI_Irecv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Request *request);
 
 // Non Blocking Wait
-int MPI_Wait(MPI_Request *request, MPI_Status *status);
 int MPI_Test(MPI_Request *request, int *flag, MPI_Status *status);
-int MPI_Waitall(int count, MPI_Request array_of_requests[], MPI_Status array_of_statuses[]);
+int MPI_Wait(MPI_Request *request, MPI_Status *status);
 int MPI_Testall(int count, MPI_Request array_of_requests[], int *flag, MPI_Status array_of_statuses[]);
-int MPI_Waitany(int count, MPI_Request array_of_requests[], int *index, MPI_Status *status);
+int MPI_Waitall(int count, MPI_Request array_of_requests[], MPI_Status array_of_statuses[]);
 int MPI_Testany(int count, MPI_Request array_of_requests[], int *index, int *flag, MPI_Status *status);
-int MPI_Waitsome(int incount, MPI_Request array_of_requests[], int *outcount, int array_of_indices[], MPI_Status array_of_statuses[]);
+int MPI_Waitany(int count, MPI_Request array_of_requests[], int *index, MPI_Status *status);
 int MPI_Testsome(int incount, MPI_Request array_of_requests[], int *outcount, int array_of_indices[], MPI_Status array_of_statuses[]);
+int MPI_Waitsome(int incount, MPI_Request array_of_requests[], int *outcount, int array_of_indices[], MPI_Status array_of_statuses[]);
 
 // Persistent Communications setup
 int MPI_Send_init(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm, MPI_Request *request);
-int MPI_Rsend_init(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm, MPI_Request *request);
+//int MPI_Rsend_init(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm, MPI_Request *request);
 int MPI_Ssend_init(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm, MPI_Request *request);
 int MPI_Bsend_init(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm, MPI_Request *request);
 int MPI_Recv_init(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Request *request);

@@ -103,79 +103,48 @@ private:
 
 extern "C" {
 
-union dataptr {
-  const void *dataorig;
-  void *databuf;
-};
+const int MPI_MAX_BUF_SEND = 8 * 512 * 1024;
 
 enum MPI_Request_type_e {
   MPI_SEND,
   MPI_RECV
 };
 
-//struct MPI_Message_s final : mpiutils::LinkListNode<MPI_Message> {
-//  struct MPI_Request_s *send_info;
-//  union dataptr data;
-//  uint32_t status;
-//  // 0 send done (may be waiting for recv)
-//  // 1 recv done (done, sender can clean)
-//};
-
-struct MPI_Request_s {
-  int count;
-  MPI_Datatype datatype;
-  int src_rank;
-  int dst_rank;
-  int tag;
-  struct MPI_Comm_s *comm;
-  // request status
-  uint32_t status;
-  // 0 not finish
-  // 1 finish (recv done)
+struct MPI_Message_info_s {
+  int count;                // nb. of items
+  MPI_Datatype datatype;    // type of items
+  int rank;                 // sender or recv rank
+  int tag;                  // tag
+  struct MPI_Comm_s *comm;  // communicator
 };
 
-struct MPI_Send_Request_s : MPI_Request_s, mpiutils::LinkListNode<struct MPI_Send_Request_s> {
+struct MPI_Message_s : MPI_Message_info_s, mpiutils::LinkListNode<struct MPI_Message_s> {
   const void *send_data;
   void *buf_data;
+  uint32_t status;
+  // 0 send done (may be waiting for recv)
+  // 1 recv done (done, sender can clean)
   bool buffered;
-  bool blocking;
+};
+
+struct MPI_Request_s : MPI_Message_info_s {
+  enum MPI_Request_type_e req_type;
+  MPI_Status mpi_status;
   bool persistent;
+  bool enable;
+  // true:  running (not finish)
+  // false: finish (send / recv done)
+};
+
+struct MPI_Send_Request_s : MPI_Request_s {
+  const void *send_data;
+  bool buffered;
+  struct MPI_Message_s *msg;
 };
 
 struct MPI_Recv_Request_s : MPI_Request_s {
   void *recv_data;
 };
-
-//struct MPI_Send_request_s : mpiutils::LinkListNode<struct MPI_Request_s>{
-//  const void *send_data;
-//  void *buf_data
-//  int count;
-//  enum MPI_Datatype dtype;
-//  int dst_rank;
-//  int tag;
-//  struct MPI_Comm_s *comm;
-//  // request status
-//  uint32_t status;
-//  // 0 send done (may be waiting for recv)
-//  // 1 recv done (done, sender can clean)
-//  // extra infos
-//  int src_rank;
-//  bool buffered;
-//  bool blocking;
-//  bool persistent;
-//  bool will_callback;
-//};
-
-//struct MPI_Recv_request_s {
-//  void *data,
-//  int count;
-//  enum MPI_Datatype dtype;
-//  int src_rank;
-//  int tag;
-//  struct MPI_Comm_s *comm;
-//};
-//
-//union MPI_Request_s : 
 
 struct MPI_Comm_s {
   int id; // id = 0 -> MPI_COMM_WORLD (the only supported)
@@ -183,7 +152,7 @@ struct MPI_Comm_s {
   uint32_t barrier_counter;
   uint32_t barrier_generation_counter;
   int *ranks; // map teams to ranks
-  struct mpiutils::LinkList<struct MPI_Send_Request_s> *messagebox;
+  struct mpiutils::LinkList<struct MPI_Message_s> *messagebox;
 };
 
 }
@@ -258,38 +227,33 @@ int mpi_rank(MPI_Comm comm) {
   return comm->ranks[omp_get_team_num()];
 }
 
-void mpi_req_init(int count, MPI_Datatype datatype, int tag, MPI_Comm comm,
-    struct MPI_Request_s *req)
+void mpi_req_init(int count, MPI_Datatype datatype,
+    int rank, int tag, MPI_Comm comm,
+    enum MPI_Request_type_e req_type, struct MPI_Request_s *req)
 {
-  req->count = count;
+  req->req_type = req_type;
+  req->count    = count;
   req->datatype = datatype;
-  req->tag = tag;
-  req->comm = comm;
-
-  atomic::store(&req->status, 0, atomic::seq_cst);
+  req->rank     = rank;
+  req->tag      = tag;
+  req->comm     = comm;
+  req->enable   = false;
 }
-
 
 struct MPI_Send_Request_s *mpi_send_init(
         const void *buf, int count, MPI_Datatype datatype,
         int recv_rank, int tag, MPI_Comm comm,
-        bool buffered, bool blocking, bool persistent)
+        bool buffered, bool persistent)
 {
   struct MPI_Send_Request_s *req =
       reinterpret_cast<struct MPI_Send_Request_s *>(
           malloc(sizeof(struct MPI_Send_Request_s)));
 
-  mpi_req_init(count, datatype, tag, comm, req);
-
-  req->src_rank = mpi_rank(comm);
-  req->dst_rank = recv_rank;
-
-  req->send_data = buf;
-  req->buf_data = nullptr;
-
-  req->buffered = buffered;
-  req->blocking = blocking;
+  req->send_data  = buf;
+  req->buffered   = buffered;
   req->persistent = persistent;
+
+  mpi_req_init(count, datatype, recv_rank, tag, comm, MPI_SEND, req);
 
   return req;
 }
@@ -302,273 +266,263 @@ struct MPI_Recv_Request_s *mpi_recv_init(
       reinterpret_cast<struct MPI_Recv_Request_s *>(
           malloc(sizeof(struct MPI_Recv_Request_s)));
 
-  mpi_req_init(count, datatype, tag, comm, req);
+  req->recv_data              = buf;
+  req->mpi_status.MPI_SOURCE  = MPI_ANY_SOURCE;
+  req->mpi_status.MPI_TAG     = MPI_ANY_TAG;
+  req->mpi_status.MPI_ERROR   = MPI_SUCCESS;
 
-  req->src_rank = send_rank;
-  req->dst_rank = mpi_rank(comm);
-
-  req->recv_data = buf;
+  mpi_req_init(count, datatype, send_rank, tag, comm, MPI_RECV, req);
 
   return req;
 }
 
-
-//
-//  req->comm = comm;
-//  req->rt = MPI_SEND;
-//  req->persistent = persistent;
-//
-//  message->sender = source_rank;
-//  message->tag = tag;
-//  atomic::store(&message->status, 0, atomic::seq_cst);
-//  message->buffered = buffered;
-//  message->blocking = blocking;
-//  message->count = count;
-//  message->datatype = datatype;
-//
-//  if (buffered){
-//    message->data.databuf = malloc(data_size);
-//    memcpy(message->data.databuf, buf, data_size);
-//  } else {
-//    message->data.dataorig = buf;
-//  }
-//
-//  return req;
-
-
-void mpi_req_free(struct MPI_Request_s *req){
-  free(req);
+void mpi_req_free(struct MPI_Request_s **req){
+  free(*req);
+  *req = MPI_REQUEST_NULL;
 }
 
-//void mpi_exec_request(struct MPI_Request_s *req){
-//   switch (req->rtype) {
-//    case (MPI_SEND):
-//      mpi_send(req);
-//      break;
-//    case (MPI_RECV):
-//      mpi_recv(req);
-//      break;
-//    default:
-//      __builtin_unreachable();
-//  }
-//}
+bool mpi_msg_test(struct MPI_Message_s *msg)
+{
+  return atomic::load(&msg->status, atomic::seq_cst) == 1;
+}
+
+void mpi_msg_wait(struct MPI_Message_s *msg)
+{
+  while (! mpi_msg_test(msg))
+    yield();
+}
+
+void mpi_msg_free(struct MPI_Message_s *msg)
+{
+  free(msg);
+}
+
+struct MPI_Message_s *mpi_send(
+    const void *buf, int count, MPI_Datatype datatype, int recv_rank,
+    int tag, MPI_Comm comm, bool buffered, bool blocking)
+{
+  int data_size = mpi_type_size(datatype) * count;
+  int send_rank = mpi_rank(comm);
+
+  struct MPI_Message_s *msg = reinterpret_cast<struct MPI_Message_s *>(
+          malloc(sizeof(struct MPI_Message_s)));
+
+  msg->datatype   = datatype;
+  msg->count      = count;
+  msg->rank       = send_rank;
+  msg->tag        = tag;
+  msg->buffered   = buffered;
+  atomic::store(&msg->status, 0, atomic::seq_cst);
+
+  if (buffered){
+    msg->buf_data = malloc(data_size);
+    memcpy(msg->buf_data, buf, data_size);
+  } else {
+    msg->send_data = buf;
+  }
+
+  comm->messagebox[recv_rank].push(msg);
+
+  if (blocking && !buffered) {// ssend
+    mpi_msg_wait(msg);
+    mpi_msg_free(msg);
+  }
+
+  return msg;
+}
+
+void mpi_send_start(struct MPI_Send_Request_s *req)
+{
+  req->enable = true;
+  struct MPI_Message_s *msg = mpi_send(req->send_data, req->count, req->datatype,
+      req->rank, req->tag, req->comm, req->buffered, false);
+  req->msg = msg;
+}
 
 bool mpi_send_test(struct MPI_Send_Request_s *req)
 {
-  return atomic::load(&req->status, atomic::seq_cst) == 1;
+  if (req->buffered)
+    return true;
+  return mpi_msg_test(req->msg);
 }
 
 void mpi_send_wait(struct MPI_Send_Request_s *req)
 {
-  while (! mpi_send_test(req))
-    yield();
+  if (req->buffered)
+    return;
+  mpi_msg_wait(req->msg);
 }
 
-void mpi_send(struct MPI_Send_Request_s *req)
+struct MPI_Message_s *__mpi_recv_test(int count, MPI_Datatype datatype,
+        int source, int tag, MPI_Comm comm)
 {
-  int data_size = mpi_type_size(req->datatype) * req->count;
-  if(req->buffered) {
-    if (req->buf_data == nullptr)
-      req->buf_data = malloc(data_size);
-    memcpy(req->buf_data, req->send_data, data_size);
-  }
-
-  req->comm->messagebox[req->dst_rank].push(req);
-
-  if (req->blocking && !req->buffered) { // ssend
-    mpi_send_wait(req);
-  }
-}
-
-
-
-
-//void mpi_send(const void *buf, int count, MPI_Datatype datatype, int dest_rank,
-//                  int tag, MPI_Comm comm, bool buffered, bool blocking){
-//  int data_size;
-//  MPI_Type_size(datatype, &data_size);
-//  data_size *= count;
-//  int source_rank = comm->ranks[omp_get_team_num()];
-//
-//  MPI_Message *message = reinterpret_cast<struct MPI_Message *>(
-//          malloc(sizeof(struct MPI_Message)));
-//
-//  message->sender = source_rank;
-//  message->tag = tag;
-//  atomic::store(&message->status, 0, atomic::seq_cst);
-//  message->buffered = buffered;
-//  message->blocking = blocking;
-//  message->count = count;
-//  message->datatype = datatype;
-//
-//  if (buffered){
-//    message->data.databuf = malloc(data_size);
-//    memcpy(message->data.databuf, buf, data_size);
-//  } else {
-//    message->data.dataorig = buf;
-//  }
-//
-//  comm->messagebox[dest_rank].push(message);
-//
-//  if (!buffered && blocking) {
-//    while(atomic::load(&message->status, atomic::seq_cst) == 0)
-//      yield();
-//    comm->messagebox[dest_rank].remove(message);
-//    free(message);
-//  }
-//
-//  return;
-//}
-
-//void mpi_recv(struct MPI_Recv_Request_s *req){
-//  struct mpiutils::LinkList<struct MPI_Send_Request_s> *messages =
-//      &comm->messagebox[req->dst_rank];
-//  bool rcv = false;
-//  while(!rcv) {
-//    messages->lock();
-//    for (struct MPI_Request_s *rsend = messages->getHead();
-//        rsend != nullptr; rsend = m->getNext()){
-//      if ((req->src_rank == MPI_ANY_SOURCE || req->src_rank == rsend->src_rank)
-//          && (req->tag == MPI_ANY_TAG || req->tag == rsend->tag)){
-//        assert(rsend->count == req->count && rsend->dtype == req->dtype
-//            && "[MPI_recv]: count or datatype invalide");
-//        messages->unlock();
-//        recv = true;
-//
-//        req->src_rank = rsend->src_rank;
-//        req->tag = rsend->tag;
-//
-//        memcpy(req->data,
-//            rsend->buffered ? rsend->data : rsend->cst_data, data_size);
-//
-//        atomic::store(&rsend->status, 1, atomic::seq_cst);
-//        req->comm->messagebox[req->dst_rank].remove(rsend);
-//
-//        if (rsend->will_callback)
-//          break;
-//
-//        mpi_send_finish(rsend);
-//        break;
-//      }
-//    }
-//    if (!recv) {
-//      messages->unlock();
-//      yield();
-//    } else {
-//      atomic::store(&req->status, 1, atomic::seq_cst);
-//    }
-//  }
-//}E
-
-struct MPI_Send_Request_s *mpi_recv_test(struct MPI_Recv_Request_s *recv)
-{
-    struct mpiutils::LinkList<struct MPI_Send_Request_s> *messages =
-        &recv->comm->messagebox[recv->dst_rank];
+    struct mpiutils::LinkList<struct MPI_Message_s> *messages =
+        &comm->messagebox[mpi_rank(comm)];
     messages->lock();
-    for (struct MPI_Send_Request_s *send = messages->getHead();
-        send != nullptr; send = send->getNext()){
-      if ((recv->src_rank == MPI_ANY_SOURCE || recv->src_rank == send->src_rank)
-          && (recv->tag == MPI_ANY_TAG || recv->tag == send->tag)){
-        assert(send->count == recv->count && send->datatype == recv->datatype
+    for (struct MPI_Message_s *msg = messages->getHead();
+        msg != nullptr; msg = msg->getNext()){
+      if ((source == MPI_ANY_SOURCE || source == msg->rank)
+          && (tag == MPI_ANY_TAG    || tag == msg->tag)){
+        assert(count == msg->count && datatype == msg->datatype
             && "[MPI_recv]: count or datatype invalide");
         messages->unlock();
-        return send;
+        // TODO: fixe race condition here
+        messages->remove(msg);
+        return msg;
       }
     }
     messages->unlock();
     return nullptr;
 }
 
-struct MPI_Send_Request_s *mpi_recv_wait(struct MPI_Recv_Request_s *recv)
+struct MPI_Message_s *__mpi_recv_wait(int count, MPI_Datatype datatype,
+        int source, int tag, MPI_Comm comm)
 {
-  struct MPI_Send_Request_s *send = nullptr;
-  while ((send = mpi_recv_test(recv)) == nullptr){
+  struct MPI_Message_s *msg = nullptr;
+  while ((msg = __mpi_recv_test(count, datatype, source, tag, comm)) == nullptr){
     // we did not reciev any messages
     yield();
   }
-  return send;
+  return msg;
 }
 
-void mpi_recv_finish(struct MPI_Recv_Request_s *recv, struct MPI_Send_Request_s *send){
-  recv->src_rank = send->src_rank;
-  recv->tag = send->tag;
+void __mpi_recv_do(struct MPI_Message_s *msg, void *buf, MPI_Status *status)
+{
+  int data_size = mpi_type_size(msg->datatype) * msg->count;
 
-  int data_size = mpi_type_size(recv->datatype) * recv->count;
-  if (send->buffered) {
-    memcpy(recv->recv_data, send->buf_data, data_size);
-    if (! send->persistent)
-      free(send->buf_data);
+  if (msg->buffered) {
+    memcpy(buf, msg->buf_data, data_size);
+    free(msg->buf_data);
   } else {
-    memcpy(recv->recv_data, send->send_data, data_size);
+    memcpy(buf, msg->send_data, data_size);
   }
 
-  atomic::store(&send->status, 1, atomic::seq_cst);
-  atomic::store(&recv->status, 1, atomic::seq_cst);
-  recv->comm->messagebox[recv->dst_rank].remove(send);
+  if (status != &MPI_STATUS_IGNORE && status != &MPI_STATUSES_IGNORE) {
+    status->MPI_SOURCE = msg->rank;
+    status->MPI_TAG = msg->tag;
+  }
+
+  if (msg->buffered)
+    mpi_msg_free(msg);
+  else
+    atomic::store(&msg->status, 1, atomic::seq_cst);
 }
 
-void mpi_recv(struct MPI_Recv_Request_s *req){
-  struct MPI_Send_Request_s *send = mpi_recv_wait(req);
-  mpi_recv_finish(req, send);
-}
-
-bool mpi_recv_try(struct MPI_Recv_Request_s *req){
-  struct MPI_Send_Request_s *send = mpi_recv_test(req);
-  if (send == nullptr)
+bool mpi_recv_test(void *buf, int count, MPI_Datatype datatype,
+    int source, int tag, MPI_Comm comm, MPI_Status *status)
+{
+  struct MPI_Message_s *msg = __mpi_recv_test(count, datatype, source, tag, comm);
+  if (msg == nullptr)
     return false;
-  mpi_recv_finish(req, send);
+  __mpi_recv_do(msg, buf, status);
   return true;
 }
 
-void mpi_get_req_status(struct MPI_Request_s *req, struct MPI_Status_s *status){
-  status->MPI_SOURCE = req->src_rank;
-  status->MPI_TAG = req->tag;
-  status->MPI_ERROR = 0;
+void mpi_recv_wait(void *buf, int count, MPI_Datatype datatype,
+    int source, int tag, MPI_Comm comm, MPI_Status *status)
+{
+  struct MPI_Message_s *msg = __mpi_recv_wait(count, datatype, source, tag, comm);
+  __mpi_recv_do(msg, buf, status);
 }
 
+void mpi_recv(void *buf, int count, MPI_Datatype datatype,
+    int source, int tag, MPI_Comm comm, MPI_Status *status)
+{
+  mpi_recv_wait(buf, count, datatype, source, tag, comm, status);
+}
 
-//void mpi_recv(void *buf, int count, MPI_Datatype datatype, int source, int tag,
-//             MPI_Comm comm, MPI_Status *status){
-//  int data_size;
-//  MPI_Type_size(datatype, &data_size);
-//  data_size *= count;
-//  int dest_rank = comm->ranks[omp_get_team_num()];
-//
-//  struct mpiutils::LinkList<MPI_Message> *messages =
-//      &comm->messagebox[dest_rank];
-//  bool recv = false;
-//  while(!recv) {
-//    messages->lock();
-//    for (MPI_Message *m = messages->getHead(); m != nullptr; m = m->getNext()){
-//      if (m->sender == source && m->tag == tag){
-//        assert(m->count == count && m->datatype == datatype
-//            && "[MPI_recv]: count or datatype invalide");
-//        messages->unlock();
-//        recv = true;
-//
-//        status->MPI_SOURCE = m->sender;
-//        status->MPI_TAG = m->tag;
-//        status->MPI_ERROR = 0;
-//        memcpy(buf, m->data.dataorig, data_size);
-//        if (m->buffered)
-//          free(m->data.databuf);
-//        if (!m->buffered && m->blocking) {
-//          atomic::store(&m->status, 1, atomic::seq_cst);
-//        } else {
-//          messages->remove(m);
-//          free(m);
-//        }
-//        return;
-//      }
-//    }
-//    if (!recv) {
-//      messages->unlock();
-//      yield();
-//    }
-//  }
-//
-//  return;
-//}
+void mpi_recv_start(struct MPI_Recv_Request_s *req){
+  bool res = mpi_recv_test(req->recv_data, req->count, req->datatype,
+          req->rank, req->tag, req->comm, &req->mpi_status);
+}
+
+bool mpi_recv_test(struct MPI_Recv_Request_s *req){
+  bool res = mpi_recv_test(req->recv_data, req->count, req->datatype,
+          req->rank, req->tag, req->comm, &req->mpi_status);
+  return res;
+}
+
+void mpi_recv_wait(struct MPI_Recv_Request_s *req){
+  mpi_recv_wait(req->recv_data, req->count, req->datatype,
+          req->rank, req->tag, req->comm, &req->mpi_status);
+}
+
+void mpi_req_start(struct MPI_Request_s **reqp){
+  if (reqp == &MPI_REQUEST_NULL)
+    return;
+
+  struct MPI_Request_s *req = *reqp;
+  if (!req->enable)
+    return;
+
+  switch (req->req_type) {
+   case (MPI_SEND):
+     mpi_send_start(static_cast<struct MPI_Send_Request_s *>(req));
+     break;
+   case (MPI_RECV):
+     mpi_recv_start(static_cast<struct MPI_Recv_Request_s *>(req));
+     break;
+   default:
+     __builtin_unreachable();
+  }
+}
+
+bool mpi_req_test(struct MPI_Request_s **reqp){
+  if (reqp == &MPI_REQUEST_NULL)
+    return false;
+
+  struct MPI_Request_s *req = *reqp;
+  if (!req->enable)
+    return false;
+
+  bool res = false;
+  switch (req->req_type) {
+    case (MPI_SEND):
+      res =  mpi_send_test(static_cast<struct MPI_Send_Request_s *>(req));
+      break;
+    case (MPI_RECV):
+      res = mpi_recv_test(static_cast<struct MPI_Recv_Request_s *>(req));
+      break;
+    default:
+      __builtin_unreachable();
+  }
+
+  return res;
+}
+
+void mpi_req_wait(struct MPI_Request_s **reqp){
+  if (reqp == &MPI_REQUEST_NULL)
+    return;
+
+  struct MPI_Request_s *req = *reqp;
+  if (!req->enable)
+    return;
+
+  switch (req->req_type) {
+   case (MPI_SEND):
+     mpi_send_wait(static_cast<struct MPI_Send_Request_s *>(req));
+     break;
+   case (MPI_RECV):
+     mpi_recv_wait(static_cast<struct MPI_Recv_Request_s *>(req));
+     break;
+   default:
+     __builtin_unreachable();
+  }
+}
+
+void mpi_req_deactivte(struct MPI_Request_s **reqp, MPI_Status *status) {
+  struct MPI_Request_s *req = *reqp;
+  if (status != &MPI_STATUS_IGNORE) {
+    status->MPI_SOURCE  = req->mpi_status.MPI_SOURCE;
+    status->MPI_TAG     = req->mpi_status.MPI_TAG;
+    status->MPI_ERROR   = req->mpi_status.MPI_ERROR;
+  }
+  if (req->persistent) {
+    req->enable = false;
+  } else {
+    mpi_req_free(reqp);
+  }
+}
 
 
 } // namespace impl
@@ -597,16 +551,16 @@ int MPI_Init(int *argc, char **argv){
     MPI_COMM_WORLD->ranks = reinterpret_cast<int *>(
             malloc(MPI_COMM_WORLD->size * sizeof(int)));
     MPI_COMM_WORLD->messagebox =
-            reinterpret_cast<struct mpiutils::LinkList<struct MPI_Send_Request_s> *>(
+            reinterpret_cast<struct mpiutils::LinkList<struct MPI_Message_s> *>(
             malloc(MPI_COMM_WORLD->size
-                * sizeof(struct mpiutils::LinkList<struct MPI_Send_Request_s>)));
+                * sizeof(struct mpiutils::LinkList<struct MPI_Message_s>)));
   }
 
   impl::barrier(&global_counter, &global_generation_counter,
           omp_get_num_teams());
 
   MPI_COMM_WORLD->ranks[omp_get_team_num()] = rank;
-  MPI_COMM_WORLD->messagebox[rank] = mpiutils::LinkList<struct MPI_Send_Request_s>();
+  MPI_COMM_WORLD->messagebox[rank] = mpiutils::LinkList<struct MPI_Message_s>();
 
   impl::barrier(&global_counter, &global_generation_counter,
           omp_get_num_teams());
@@ -649,34 +603,27 @@ int MPI_Type_size(MPI_Datatype datatype, int *size){
 
 int MPI_Send(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm)
 {
-  struct MPI_Send_Request_s *req = impl::mpi_send_init(buf, count, datatype, dest, tag, comm, true, true, false);
-  impl::mpi_send(req);
-  // req will be free by the reciver
+  impl::mpi_send(buf, count, datatype, dest, tag, comm,
+      (count * impl::mpi_type_size(datatype)) < MPI_MAX_BUF_SEND, true);
   return 0;
 }
 
 int MPI_Bsend(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm)
 {
-  struct MPI_Send_Request_s *req = impl::mpi_send_init(buf, count, datatype, dest, tag, comm, true, true, false);
-  impl::mpi_send(req);
-  // req will be free by the reciver
+  impl::mpi_send(buf, count, datatype, dest, tag, comm, true, true);
   return 0;
 }
 
 int MPI_Ssend(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm)
 {
-  struct MPI_Send_Request_s *req = impl::mpi_send_init(buf, count, datatype, dest, tag, comm, false, true, false);
-  impl::mpi_send(req);
-  impl::mpi_req_free(req);
+
+  impl::mpi_send(buf, count, datatype, dest, tag, comm, false, true);
   return 0;
 }
 
 int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status *status)
 {
-  struct MPI_Recv_Request_s *req = impl::mpi_recv_init(buf, count, datatype, source, tag, comm);
-  impl::mpi_recv(req);
-  impl::mpi_get_req_status(req, status);
-  impl::mpi_req_free(req);
+  impl::mpi_recv(buf, count, datatype, source, tag, comm, status);
   return 0;
 }
 
@@ -684,110 +631,173 @@ int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, M
 
 int MPI_Isend(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm, MPI_Request *request)
 {
-  struct MPI_Send_Request_s *req = impl::mpi_send_init(buf, count, datatype, dest, tag, comm, true, false, false);
-  impl::mpi_send(req);
+  struct MPI_Send_Request_s *req = 
+    impl::mpi_send_init(buf, count, datatype, dest, tag, comm,
+      (count * impl::mpi_type_size(datatype)) < MPI_MAX_BUF_SEND, false);
+  impl::mpi_send_start(req);
   *request = req;
   return 0;
 }
 
 int MPI_Ibsend(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm, MPI_Request *request)
 {
-  struct MPI_Send_Request_s *req = impl::mpi_send_init(buf, count, datatype, dest, tag, comm, true, false, false);
-  impl::mpi_send(req);
+  struct MPI_Send_Request_s *req =
+    impl::mpi_send_init(buf, count, datatype, dest, tag, comm, true, false);
+  impl::mpi_send_start(req);
   *request = req;
   return 0;
 }
 
 int MPI_Issend(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm, MPI_Request *request)
 {
-  struct MPI_Send_Request_s *req = impl::mpi_send_init(buf, count, datatype, dest, tag, comm, false, false, false);
-  impl::mpi_send(req);
+  struct MPI_Send_Request_s *req =
+    impl::mpi_send_init(buf, count, datatype, dest, tag, comm, false, false);
+  impl::mpi_send_start(req);
   *request = req;
   return 0;
 }
 
 int MPI_Irecv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Request *request)
 {
-  struct MPI_Recv_Request_s *req = impl::mpi_recv_init(buf, count, datatype, source, tag, comm);
-  impl::mpi_recv_try(req);
+  struct MPI_Recv_Request_s *req =
+    impl::mpi_recv_init(buf, count, datatype, source, tag, comm);
+  impl::mpi_recv_start(req); // try to recive early to reduce deadlock probability
   *request = req;
   return 0;
 }
 
 // Test & Wait
 
-int MPI_Wait(MPI_Request *request, MPI_Status *status)
-{
-
-  return 0;
-}
-
 int MPI_Test(MPI_Request *request, int *flag, MPI_Status *status)
 {
-
+  *flag = impl::mpi_req_test(request);
+  if (*flag)
+    impl::mpi_req_deactivte(request, status);
   return 0;
 }
 
-int MPI_Waitall(int count, MPI_Request array_of_requests[], MPI_Status array_of_statuses[])
+int MPI_Wait(MPI_Request *request, MPI_Status *status)
 {
-
+  impl::mpi_req_wait(request);
+  impl::mpi_req_deactivte(request, status);
   return 0;
 }
 
 int MPI_Testall(int count, MPI_Request array_of_requests[], int *flag, MPI_Status array_of_statuses[])
 {
-
+  int finished = 0;
+  for (int i = 0; i < count; ++i)
+    finished += impl::mpi_req_test(&array_of_requests[i]);
+  *flag = (finished == count);
+  if (*flag)
+    for (int i = 0; i < count; ++i)
+      impl::mpi_req_deactivte(&array_of_requests[i], &array_of_statuses[i]);
   return 0;
 }
 
-int MPI_Waitany(int count, MPI_Request array_of_requests[], int *index, MPI_Status *status)
+int MPI_Waitall(int count, MPI_Request array_of_requests[], MPI_Status array_of_statuses[])
 {
-
+  // we don't want to wait for the request one after the others
+  while (true) {
+    int finished = 0;
+    for (int i = 0; i < count; ++i)
+      finished += impl::mpi_req_test(&array_of_requests[i]);
+    if (finished >= count)
+      break;
+    impl::yield();
+  }
+  for (int i = 0; i < count; ++i)
+    impl::mpi_req_deactivte(&array_of_requests[i], &array_of_statuses[i]);
   return 0;
 }
 
 int MPI_Testany(int count, MPI_Request array_of_requests[], int *index, int *flag, MPI_Status *status)
 {
-
+  for (int i = 0; i < count; ++i) {
+    if (impl::mpi_req_test(&array_of_requests[i])) {
+      *flag = true;
+      *index = i;
+      impl::mpi_req_deactivte(&array_of_requests[i], status);
+      return 0;
+    }
+  }
+  *flag = false;
   return 0;
 }
 
-int MPI_Waitsome(int incount, MPI_Request array_of_requests[], int *outcount, int array_of_indices[], MPI_Status array_of_statuses[])
+int MPI_Waitany(int count, MPI_Request array_of_requests[], int *index, MPI_Status *status)
 {
-
+  while (true) {
+    for (int i = 0; i < count; ++i) {
+      if (impl::mpi_req_test(&array_of_requests[i])) {
+        *index = i;
+        impl::mpi_req_deactivte(&array_of_requests[i], status);
+        return 0;
+      }
+    }
+    impl::yield();
+  }
   return 0;
 }
 
 int MPI_Testsome(int incount, MPI_Request array_of_requests[], int *outcount, int array_of_indices[], MPI_Status array_of_statuses[])
 {
-
+  *outcount = 0;
+  for (int i = 0; i < incount; ++i) {
+    if(impl::mpi_req_test(&array_of_requests[i])) {
+      array_of_indices[*outcount] = i;
+      impl::mpi_req_deactivte(&array_of_requests[i], &array_of_statuses[*outcount]);
+      (*outcount)++;
+    }
+  }
   return 0;
 }
+
+int MPI_Waitsome(int incount, MPI_Request array_of_requests[], int *outcount, int array_of_indices[], MPI_Status array_of_statuses[])
+{
+  while (true) {
+    for (int i = 0; i < incount; ++i)
+      if (impl::mpi_req_test(&array_of_requests[i]))
+        return MPI_Testsome(incount, array_of_requests, outcount, array_of_indices, array_of_statuses);
+    impl::yield();
+  }
+  return 0;
+}
+
+
 
 // Persistent Communications setup
 
 int MPI_Send_init(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm, MPI_Request *request)
 {
-  return 0;
-}
-
-int MPI_Rsend_init(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm, MPI_Request *request)
-{
+  struct MPI_Send_Request_s *req =
+    impl::mpi_send_init(buf, count, datatype, dest, tag, comm,
+      (count * impl::mpi_type_size(datatype)) < MPI_MAX_BUF_SEND, true);
+  *request = req;
   return 0;
 }
 
 int MPI_Ssend_init(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm, MPI_Request *request)
 {
+  struct MPI_Send_Request_s *req =
+    impl::mpi_send_init(buf, count, datatype, dest, tag, comm, true, true);
+  *request = req;
   return 0;
 }
 
 int MPI_Bsend_init(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm, MPI_Request *request)
 {
+  struct MPI_Send_Request_s *req =
+    impl::mpi_send_init(buf, count, datatype, dest, tag, comm, false, true);
+  *request = req;
   return 0;
 }
 
 int MPI_Recv_init(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Request *request)
 {
+  struct MPI_Recv_Request_s *req =
+    impl::mpi_recv_init(buf, count, datatype, source, tag, comm);
+  *request = req;
   return 0;
 }
 
@@ -795,16 +805,20 @@ int MPI_Recv_init(void *buf, int count, MPI_Datatype datatype, int source, int t
 
 int MPI_Start(MPI_Request *request)
 {
+  impl::mpi_req_start(request);
   return 0;
 }
 
 int MPI_Startall(int count, MPI_Request array_of_requests[])
 {
+  for (int i = 0; i < count; ++i)
+    MPI_Start(&array_of_requests[i]);
   return 0;
 }
 
 int MPI_Request_free(MPI_Request *request)
 {
+  impl::mpi_req_free(request);
   return 0;
 }
 
