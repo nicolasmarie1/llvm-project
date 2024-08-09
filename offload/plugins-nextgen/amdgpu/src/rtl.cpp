@@ -678,7 +678,7 @@ struct AMDGPUQueueTy {
     if (Queue)
       return Plugin::success();
     hsa_status_t Status =
-        hsa_queue_create(Agent, QueueSize, HSA_QUEUE_TYPE_MULTI, callbackError,
+        hsa_queue_create(Agent, QueueSize, 2 /*HSA_QUEUE_TYPE_MULTI*/, callbackError,
                          nullptr, UINT32_MAX, UINT32_MAX, &Queue);
     return Plugin::check(Status, "Error in hsa_queue_create: %s");
   }
@@ -3315,16 +3315,33 @@ Error AMDGPUKernelTy::launchImpl(GenericDeviceTy &GenericDevice,
   if (GenericDevice.getRPCServer())
     Stream->setRPCServer(GenericDevice.getRPCServer());
 
+
+  utils::AMDGPUMGSyncInfo *multigridSyncArgs = nullptr;
+  if (auto Err = ArgsMemoryManager.allocate(sizeof(utils::AMDGPUMGSyncInfo),
+        reinterpret_cast<void **>(&multigridSyncArgs)))
+    return Err;
+
+  multigridSyncArgs->mgs = nullptr;                     // multigrid sync barrier data pointer
+  multigridSyncArgs->sgs = {0, 0};                      // singlegrid sync barrier data
+  multigridSyncArgs->grid_id = 0;                       // id of the current grid in multigpu launch
+  multigridSyncArgs->num_grids = 1;                     // number of grid in multigpu launch
+  multigridSyncArgs->prev_sum = 0;                      // sum of all thread that have already been run
+  multigridSyncArgs->all_sum = NumBlocks * NumThreads;  // sum of all thread to run
+  multigridSyncArgs->num_wg = NumBlocks;                // number of workgroup (nb. teams)
+
+  //printf("%lu\n", NumBlocks);
+
   // Only COV5 implicitargs needs to be set. COV4 implicitargs are not used.
   if (getImplicitArgsSize() == sizeof(utils::AMDGPUImplicitArgsTy)) {
-    ImplArgs->BlockCountX = NumBlocks;
-    ImplArgs->BlockCountY = 1;
-    ImplArgs->BlockCountZ = 1;
-    ImplArgs->GroupSizeX = NumThreads;
-    ImplArgs->GroupSizeY = 1;
-    ImplArgs->GroupSizeZ = 1;
-    ImplArgs->GridDims = 1;
-    ImplArgs->DynamicLdsSize = KernelArgs.DynCGroupMem;
+    ImplArgs->block_count_x = NumBlocks;
+    ImplArgs->block_count_y = 1;
+    ImplArgs->block_count_z = 1;
+    ImplArgs->group_size_x = NumThreads;
+    ImplArgs->group_size_y = 1;
+    ImplArgs->group_size_z = 1;
+    ImplArgs->grid_dims = 1;
+    ImplArgs->dynamic_lds_size = KernelArgs.DynCGroupMem;
+    ImplArgs->multigrid_sync_arg = multigridSyncArgs;
   }
 
   // Push the kernel launch into the stream.

@@ -35,19 +35,55 @@ namespace target {
 namespace plugin {
 namespace utils {
 
+
+// GPU struct for cooperative group / grid sync / multigrid sync
+// The structures below for MGPU launch match the device library format
+struct AMDGPUMGSyncData {
+  uint32_t w0;
+  uint32_t w1;
+};
+
+struct AMDGPUMGSyncInfo {
+  struct AMDGPUMGSyncData* mgs;
+  uint32_t grid_id;
+  uint32_t num_grids;
+  uint64_t prev_sum;
+  uint64_t all_sum;
+  struct AMDGPUMGSyncData sgs;
+  uint num_wg;
+};
+
+
 // The implicit arguments of COV5 AMDGPU kernels.
+// See: https://github.com/llvm/llvm-project/blob/6e86e11148474e4ecd49dbf0ca5dd9caddcdbd11/llvm/lib/Target/AMDGPU/AMDGPUHSAMetadataStreamer.cpp#L583
+// static_assert(sizeof(void *) == 8)
 struct AMDGPUImplicitArgsTy {
-  uint32_t BlockCountX;
-  uint32_t BlockCountY;
-  uint32_t BlockCountZ;
-  uint16_t GroupSizeX;
-  uint16_t GroupSizeY;
-  uint16_t GroupSizeZ;
-  uint8_t Unused0[46]; // 46 byte offset.
-  uint16_t GridDims;
-  uint8_t Unused1[54]; // 54 byte offset.
-  uint32_t DynamicLdsSize;
-  uint8_t Unused2[132]; // 132 byte offset.
+  uint32_t block_count_x;
+  uint32_t block_count_y;
+  uint32_t block_count_z;
+  uint16_t group_size_x;
+  uint16_t group_size_y;
+  uint16_t group_size_z;
+  uint16_t remainder_x;
+  uint16_t remainder_y;
+  uint16_t remainder_z;
+  uint8_t  reserved0[16];  // reserved
+  uint64_t global_offset_x;
+  uint64_t global_offset_y;
+  uint64_t global_offset_z;
+  uint16_t grid_dims;
+  uint8_t  reserved1[6];   // reserved
+  void *   printf_buffer;
+  void *   hostcall_buffer;
+  AMDGPUMGSyncInfo *multigrid_sync_arg;
+  void *   heap_v1;
+  void *   completion_action;
+  uint32_t dynamic_lds_size;
+  uint8_t  reserved2[68];  // reserved
+  uint32_t private_base;
+  uint32_t shared_base;
+  void *   queue_ptr;
+  uint8_t  unused[48];    // 48 byte offset.
 };
 
 // Dummy struct for COV4 implicitargs.
