@@ -1475,6 +1475,7 @@ CodeGenFunction::EmitAutoVarAlloca(const VarDecl &D) {
 
   bool NRVO = getLangOpts().ElideConstructors && D.isNRVOVariable();
 
+  bool VarAllocated = false; // omp  dynamic allocation
   if (getLangOpts().OpenMP && OpenMPLocalAddr.isValid()) {
     address = OpenMPLocalAddr;
     AllocaAddr = OpenMPLocalAddr;
@@ -1608,7 +1609,6 @@ CodeGenFunction::EmitAutoVarAlloca(const VarDecl &D) {
     // by the definition of the VLA. Since this is an escaped declaration, in
     // OpenMP we have to use a call to __kmpc_alloc_shared(). The matching
     // deallocation call to __kmpc_free_shared() is emitted later.
-    bool VarAllocated = false;
     if (getLangOpts().OpenMPIsTargetDevice) {
       auto &RT = CGM.getOpenMPRuntime();
       if (RT.isDelayedVariableLengthDecl(*this, &D)) {
@@ -1668,7 +1668,7 @@ CodeGenFunction::EmitAutoVarAlloca(const VarDecl &D) {
   emission.AllocaAddr = AllocaAddr;
 
   // Emit debug info for local var declaration.
-  if (EmitDebugInfo && HaveInsertPoint()) {
+  if (EmitDebugInfo && HaveInsertPoint() && !VarAllocated) {
     Address DebugAddr = address;
     bool UsePointerValue = NRVO && ReturnValuePointer.isValid();
     DI->setLocation(D.getLocation());
