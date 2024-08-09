@@ -28,10 +28,10 @@ if(OPENMP_STANDALONE_BUILD)
 else()
   # When building in tree we install the runtime according to the LLVM settings.
   if(LLVM_ENABLE_PER_TARGET_RUNTIME_DIR AND NOT APPLE)
-    set(OFFLOAD_INSTALL_LIBDIR lib${LLVM_LIBDIR_SUFFIX}/${LLVM_DEFAULT_TARGET_TRIPLE} CACHE STRING
+    set(OFFLOAD_INSTALL_LIBDIR "lib${LLVM_LIBDIR_SUFFIX}/${LLVM_DEFAULT_TARGET_TRIPLE}/offload" CACHE STRING
       "Path where built offload libraries should be installed.")
   else()
-    set(OFFLOAD_INSTALL_LIBDIR "lib${LLVM_LIBDIR_SUFFIX}" CACHE STRING
+    set(OFFLOAD_INSTALL_LIBDIR "lib${LLVM_LIBDIR_SUFFIX}/offload" CACHE STRING
       "Path where built offload libraries should be installed.")
   endif()
 endif()
