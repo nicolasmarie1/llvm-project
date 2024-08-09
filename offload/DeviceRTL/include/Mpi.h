@@ -16,7 +16,7 @@ extern "C" {
 typedef struct MPI_Comm_s *MPI_Comm;
 MPI_Comm MPI_COMM_WORLD;
 
-enum MPI_Datatype_e {
+typedef enum MPI_Datatype_e {
   MPI_CHAR,
   MPI_SHORT,
   MPI_INT,
@@ -55,15 +55,26 @@ enum MPI_Datatype_e {
 //MPI_CXX_FLOAT_COMPLEX,
 //MPI_CXX_DOUBLE_COMPLEX,
 //MPI_CXX_LONG_DOUBLE_COMPLEX,
-};
-typedef enum MPI_Datatype_e MPI_Datatype;
+} MPI_Datatype;
 
-struct MPI_Status_s {
+typedef enum MPI_Intent_e {
+  MPI_THREAD_SINGLE,
+  MPI_THREAD_FUNNELED,
+  MPI_THREAD_SERIALIZED,
+  MPI_THREAD_MULTIPLE
+} MPI_Intent;
+
+typedef void MPI_User_function(void *invec, void *inoutvec, int *len, MPI_Datatype *datatype);
+
+typedef struct MPI_Op_s {
+  MPI_User_function *func;
+} MPI_Op;
+
+typedef struct MPI_Status_s {
   int MPI_SOURCE;
   int MPI_TAG;
   int MPI_ERROR;
-};
-typedef struct MPI_Status_s MPI_Status;
+} MPI_Status;
 
 typedef struct MPI_Request_s *MPI_Request;
 
@@ -77,12 +88,19 @@ const int MPI_SUCCESS = 0;
 
 MPI_Status MPI_STATUS_IGNORE;
 MPI_Status MPI_STATUSES_IGNORE;
-MPI_Request MPI_REQUEST_NULL = 0; // nullptr in cpp and NULL in c
+
+MPI_Op MPI_MIN;
+MPI_Op MPI_MAX;
+
+MPI_Request MPI_REQUEST_NULL = 0;
 
 // Common  functions
 int MPI_Init(int *argc, char **argv);
-int MPI_Barrier(MPI_Comm comm);
+int MPI_Init_thread(int *argc, char ***argv, int required, int *provided);
 int MPI_Finalize(void);
+int MPI_Abort(MPI_Comm comm, int errorcode);
+
+int MPI_Barrier(MPI_Comm comm);
 
 int MPI_Comm_rank(MPI_Comm comm, int *rank);
 int MPI_Comm_size(MPI_Comm comm, int *size);
@@ -124,6 +142,13 @@ int MPI_Recv_init(void *buf, int count, MPI_Datatype datatype, int source, int t
 int MPI_Start(MPI_Request *request);
 int MPI_Startall(int count, MPI_Request array_of_requests[]);
 int MPI_Request_free(MPI_Request *request);
+
+// Collective Operation
+int MPI_Reduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype datatype, MPI_Op op, int root, MPI_Comm comm);
+int MPI_Allreduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype datatype, MPI_Op op, MPI_Comm comm);
+
+// Uknow
+double MPI_Wtime(void);
 
 #ifdef  __cplusplus
 }

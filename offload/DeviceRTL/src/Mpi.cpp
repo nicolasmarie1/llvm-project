@@ -118,7 +118,8 @@ struct MPI_Message_info_s {
   struct MPI_Comm_s *comm;  // communicator
 };
 
-struct MPI_Message_s : MPI_Message_info_s, mpiutils::LinkListNode<struct MPI_Message_s> {
+struct MPI_Message_s : MPI_Message_info_s,
+    mpiutils::LinkListNode<struct MPI_Message_s> {
   const void *send_data;
   void *buf_data;
   uint32_t status;
@@ -157,15 +158,31 @@ struct MPI_Comm_s {
 
 }
 
-
-
 namespace impl {
 
+// forward declaration for varient
+void yield(void);
+
+// amdgcn
+#pragma omp begin declare variant match(device = {arch(amdgcn)})
+
 void yield(void){
-  // split kernel here
+  // split kernel here (if it is ever implemented)
   //__ompx_split();
   __builtin_amdgcn_s_sleep(1);
 }
+#pragma omp end declare variant
+
+
+// nvptx
+#pragma omp begin declare variant match(                                       \
+        device = {arch(nvptx, nvptx64)},                                       \
+            implementation = {extension(match_any)})
+void yield(void){
+  // split kernel here
+  //__ompx_split();
+}
+#pragma omp end declare variant
 
 void barrier(uint32_t *counter, uint32_t *gen_counter, uint32_t size){
   int previous_gen = ompx::atomic::load(gen_counter, ompx::atomic::seq_cst);
@@ -561,11 +578,21 @@ int MPI_Init(int *argc, char **argv){
           omp_get_num_teams());
 
   MPI_COMM_WORLD->ranks[omp_get_team_num()] = rank;
-  new (&MPI_COMM_WORLD->messagebox[rank]) mpiutils::LinkList<struct MPI_Message_s>();
+  new (&MPI_COMM_WORLD->messagebox[rank])
+      mpiutils::LinkList<struct MPI_Message_s>();
 
   impl::barrier(&global_counter, &global_generation_counter,
           omp_get_num_teams());
   return 0;
+}
+
+int MPI_Init_thread(int *argc, char ***argv, int required, int *provided)
+{
+  if (required == MPI_THREAD_MULTIPLE)
+    return 1; //TODO; Return proper MPI_Error
+  *provided = MPI_THREAD_FUNNELED;
+
+  return MPI_Init(argc, *argv);
 }
 
 int MPI_Finalize(void){
@@ -576,6 +603,13 @@ int MPI_Finalize(void){
     free(MPI_COMM_WORLD->messagebox);
     free(MPI_COMM_WORLD);
   }
+  return 0;
+}
+
+int MPI_Abort(MPI_Comm comm, int errorcode)
+{
+  printf("MPI_Abort(%d)\n", errorcode);
+  // TODO; Abort the GPu kernel here
   return 0;
 }
 
@@ -609,16 +643,16 @@ int MPI_Send(const void *buf, int count, MPI_Datatype datatype, int dest, int ta
   return 0;
 }
 
-int MPI_Bsend(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm)
-{
-  impl::mpi_send(buf, count, datatype, dest, tag, comm, true, true);
-  return 0;
-}
-
 int MPI_Ssend(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm)
 {
 
   impl::mpi_send(buf, count, datatype, dest, tag, comm, false, true);
+  return 0;
+}
+
+int MPI_Bsend(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm)
+{
+  impl::mpi_send(buf, count, datatype, dest, tag, comm, true, true);
   return 0;
 }
 
@@ -640,19 +674,19 @@ int MPI_Isend(const void *buf, int count, MPI_Datatype datatype, int dest, int t
   return 0;
 }
 
-int MPI_Ibsend(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm, MPI_Request *request)
+int MPI_Issend(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm, MPI_Request *request)
 {
   struct MPI_Send_Request_s *req =
-    impl::mpi_send_init(buf, count, datatype, dest, tag, comm, true, false);
+    impl::mpi_send_init(buf, count, datatype, dest, tag, comm, false, false);
   impl::mpi_send_start(req);
   *request = req;
   return 0;
 }
 
-int MPI_Issend(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm, MPI_Request *request)
+int MPI_Ibsend(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm, MPI_Request *request)
 {
   struct MPI_Send_Request_s *req =
-    impl::mpi_send_init(buf, count, datatype, dest, tag, comm, false, false);
+    impl::mpi_send_init(buf, count, datatype, dest, tag, comm, true, false);
   impl::mpi_send_start(req);
   *request = req;
   return 0;
@@ -747,7 +781,8 @@ int MPI_Testsome(int incount, MPI_Request array_of_requests[], int *outcount, in
   for (int i = 0; i < incount; ++i) {
     if(impl::mpi_req_test(&array_of_requests[i])) {
       array_of_indices[*outcount] = i;
-      impl::mpi_req_deactivte(&array_of_requests[i], &array_of_statuses[*outcount]);
+      impl::mpi_req_deactivte(&array_of_requests[i],
+                              &array_of_statuses[*outcount]);
       (*outcount)++;
     }
   }
@@ -759,7 +794,8 @@ int MPI_Waitsome(int incount, MPI_Request array_of_requests[], int *outcount, in
   while (true) {
     for (int i = 0; i < incount; ++i)
       if (impl::mpi_req_test(&array_of_requests[i]))
-        return MPI_Testsome(incount, array_of_requests, outcount, array_of_indices, array_of_statuses);
+        return MPI_Testsome(incount, array_of_requests,
+                            outcount, array_of_indices, array_of_statuses);
     impl::yield();
   }
   return 0;
@@ -781,7 +817,7 @@ int MPI_Send_init(const void *buf, int count, MPI_Datatype datatype, int dest, i
 int MPI_Ssend_init(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm, MPI_Request *request)
 {
   struct MPI_Send_Request_s *req =
-    impl::mpi_send_init(buf, count, datatype, dest, tag, comm, true, true);
+    impl::mpi_send_init(buf, count, datatype, dest, tag, comm, false, true);
   *request = req;
   return 0;
 }
@@ -789,7 +825,7 @@ int MPI_Ssend_init(const void *buf, int count, MPI_Datatype datatype, int dest, 
 int MPI_Bsend_init(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm, MPI_Request *request)
 {
   struct MPI_Send_Request_s *req =
-    impl::mpi_send_init(buf, count, datatype, dest, tag, comm, false, true);
+    impl::mpi_send_init(buf, count, datatype, dest, tag, comm, true, true);
   *request = req;
   return 0;
 }
@@ -822,6 +858,26 @@ int MPI_Request_free(MPI_Request *request)
   impl::mpi_req_free(request);
   return 0;
 }
+
+// Collective Operation
+int MPI_Reduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype datatype, MPI_Op op, int root, MPI_Comm comm)
+{
+  // TODO; Implement MPI_Reduce
+  return 0;
+}
+
+int MPI_Allreduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype datatype, MPI_Op op, MPI_Comm comm)
+{
+  // TODO; Implement MPI_Allreduce
+  return 0;
+}
+
+// double
+double MPI_Wtime(void)
+{
+  return omp_get_wtime(); // thx openmp
+}
+
 
 } // extern "C"
 
