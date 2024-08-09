@@ -74,7 +74,7 @@ static constexpr const char *InternalPrefix[] = {
     "__kmp", "llvm.",        "nvm.",
     "omp_",  "vprintf",      "malloc",
     "free",  "__keep_alive", "__llvm_omp_vprintf",
-    "rpc_", "MPI_"
+    "rpc_", "MPI_", "fprintf", "sprintf"
 };
 
 bool isInternalFunction(Function &F) {
@@ -418,7 +418,7 @@ bool HostRPC::run() {
 
   Changed = true;
 
-
+  LLVM_DEBUG(dbgs() << "[HostRPC] Reading Function to relocate:\n");
   // We add a couple of assumptions to those RPC functions such that AAs will
   // not error out because of unknown implementation of those functions.
   for (Function &F : M) {
@@ -455,12 +455,14 @@ bool HostRPC::run() {
   if (!recollectInformation())
     return Status == ChangeStatus::CHANGED;
 
+  LLVM_DEBUG(dbgs() << "[HostRPC] Rewrite Functions:\n");
   for (Function *F : FunctionWorkList)
     Changed |= rewriteWithHostRPC(F);
 
   if (!Changed)
     return Changed;
 
+  LLVM_DEBUG(dbgs() << "[HostRPC] Replace Function Call:\n");
   // replace all call to the function to a call to the rpc wrapper that have replace it.
   for (auto Itr = CallInstMap.rbegin(); Itr != CallInstMap.rend(); ++Itr) {
     auto *CI = Itr->first;
@@ -469,17 +471,24 @@ bool HostRPC::run() {
     CI->eraseFromParent();
   }
 
+  LLVM_DEBUG(dbgs() << "[HostRPC] Erase Call to Non existing Functions:\n");
   // erase all trace of the function in the Module
   for (Function *F : FunctionWorkList)
     if (F->user_empty())
       F->eraseFromParent();
 
+  LLVM_DEBUG(dbgs() << "[HostRPC] Emit Host Wrapper:\n");
   emitHostWrapperInvoker();
 
+  LLVM_DEBUG(dbgs() << "[HostRPC] Done\n");
   return Changed;
 }
 
 bool HostRPC::rewriteWithHostRPC(Function *F) {
+  LLVM_DEBUG({
+    dbgs() << "[HostRPC] Rewriting Function: " << *F << "\n";
+  });
+
   SmallVector<CallInst *> WorkList;
 
   for (User *U : F->users()) {
@@ -581,19 +590,19 @@ bool HostRPC::rewriteWithHostRPC(Function *F) {
 
       Value *Operand = CI->getArgOperand(I);
 
-      LLVM_DEBUG({dbgs() << "[HostRPC] [argparse]: Argument: " << I << ": " << *Operand << "\n"; });
+      //LLVM_DEBUG({dbgs() << "[HostRPC] [argparse]: Argument: " << I << ": " << *Operand << "\n"; });
 
       // Check if scalar type.
       if (!Operand->getType()->isPointerTy()) {
         AII.emplace_back();
         HandleDirectUse(Operand, AII.back());
         IsConstantArgInfo = IsConstantArgInfo && isa<Constant>(Operand);
-        LLVM_DEBUG({dbgs() << "[HostRPC] [argparse]: Constant: " << *Operand << "\n"; });
+        //LLVM_DEBUG({dbgs() << "[HostRPC] [argparse]: Constant: " << *Operand << "\n"; });
         continue;
       }
 
       if (CheckIfNullPtr(Operand)){
-        LLVM_DEBUG({dbgs() << "[HostRPC] [argparse]: Null Ptr: " << *Operand << "\n"; });
+        //LLVM_DEBUG({dbgs() << "[HostRPC] [argparse]: Null Ptr: " << *Operand << "\n"; });
         continue;
       }
 
@@ -622,7 +631,7 @@ bool HostRPC::rewriteWithHostRPC(Function *F) {
                                    : ArgType::OMP_HOST_RPC_ARG_COPY_TOFROM);
         } else if (CheckIfDynAlloc(&Obj)) {
           // We will handle this case at runtime so here we don't do anything.
-          LLVM_DEBUG({dbgs() << "[HostRPC] [argparse]: Dynamic Alloc: " << *Operand << "\n"; });
+          //LLVM_DEBUG({dbgs() << "[HostRPC] [argparse]: Dynamic Alloc: " << *Operand << "\n"; });
           return true;
         } else if (isa<AllocaInst>(&Obj)) {
           llvm_unreachable("alloca instruction needs to be handled!");
@@ -638,12 +647,12 @@ bool HostRPC::rewriteWithHostRPC(Function *F) {
         return true;
       };
 
-      LLVM_DEBUG({
-        dbgs() << "[HostRPC] function rewrite:\n"
-                << "Function: " << *F << "\n"
-                << "Call site: " << *CI << "\n "
-                << "Operand: " << *Operand << "\n";
-      });
+      //LLVM_DEBUG({
+      //  dbgs() << "[HostRPC] function rewrite:\n"
+      //          << "Function: " << *F << "\n"
+      //          << "Call site: " << *CI << "\n "
+      //          << "Operand: " << *Operand << "\n";
+      //});
 
       // TODO replace with LLVM functions to not use Attributors.
       assert(!IRPosition::callsite_argument(*CI, I)
@@ -654,7 +663,7 @@ bool HostRPC::rewriteWithHostRPC(Function *F) {
         A.getOrCreateAAFor<AAUnderlyingObjects>(
             IRPosition::callsite_argument(*CI, I));
 
-      LLVM_DEBUG({dbgs() << "[HostRPC] AAUO:" << AAUO << "\n";});
+      //LLVM_DEBUG({dbgs() << "[HostRPC] AAUO:" << AAUO << "\n";});
       if (!AAUO->forallUnderlyingObjects(Pred))
         llvm_unreachable("internal error");
     }
@@ -770,9 +779,9 @@ Function *HostRPC::getDeviceWrapperFunction(StringRef WrapperName, Function *F,
   Value *Desc = nullptr;
   {
     Function *Fn = RFIs[OMPRTL___kmpc_host_rpc_get_desc];
-    LLVM_DEBUG({dbgs() << "[HostRPC] Building: rpc get desc: " << Fn->getName() << "\n"; });
+    //LLVM_DEBUG({dbgs() << "[HostRPC] Building: rpc get desc: " << Fn->getName() << "\n"; });
     for (unsigned i = 0; i < 3; ++i)
-      LLVM_DEBUG({dbgs() << "ParamI: " << *(Fn->getFunctionType()->getParamType(i)) << "\n"; });
+      //LLVM_DEBUG({dbgs() << "ParamI: " << *(Fn->getFunctionType()->getParamType(i)) << "\n"; });
 
     Desc = Builder.CreateCall(
       Fn,
@@ -787,7 +796,7 @@ Function *HostRPC::getDeviceWrapperFunction(StringRef WrapperName, Function *F,
 
   {
     Function *Fn = RFIs[OMPRTL___kmpc_host_rpc_add_arg];
-    LLVM_DEBUG({dbgs() << "[HostRPC] Building: rpc add arg\n"; });
+    //LLVM_DEBUG({dbgs() << "[HostRPC] Building: rpc add arg\n"; });
     for (unsigned I = NumArgSkipped; I < WrapperFn->arg_size(); ++I) {
       Value *V = convertToInt64Ty(WrapperFn->getArg(I));
       Builder.CreateCall(
@@ -795,7 +804,7 @@ Function *HostRPC::getDeviceWrapperFunction(StringRef WrapperName, Function *F,
     }
   }
 
-  LLVM_DEBUG({dbgs() << "[HostRPC] Building: rpc send and wait\n"; });
+  //LLVM_DEBUG({dbgs() << "[HostRPC] Building: rpc send and wait\n"; });
   Value *RetVal =
       Builder.CreateCall(RFIs[OMPRTL___kmpc_host_rpc_send_and_wait], {Desc});
 
@@ -809,7 +818,7 @@ Function *HostRPC::getDeviceWrapperFunction(StringRef WrapperName, Function *F,
 
   Builder.CreateRet(RetVal);
 
-  LLVM_DEBUG({dbgs() << "[HostRPC] Device Wrapper Function:\n" << *WrapperFn; });
+  //LLVM_DEBUG({dbgs() << "[HostRPC] Device Wrapper Function:\n" << *WrapperFn; });
 
   return WrapperFn;
 }
