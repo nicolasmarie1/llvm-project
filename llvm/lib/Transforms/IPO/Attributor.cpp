@@ -401,13 +401,13 @@ static bool getPotentialCopiesOfMemoryValue(
       auto *CB = dyn_cast<CallBase>(&Obj);
       bool R = false;
       if (CB) {
-        auto &AAN =
-            *A.getOrCreateAAFor<AANoAlias>(IRPosition::callsite_returned(*CB),
+        const AANoAlias *AAN =
+            A.getOrCreateAAFor<AANoAlias>(IRPosition::callsite_returned(*CB),
                                           &QueryingAA, DepClassTy::OPTIONAL);
         if (! AAN)
           return false;
-        if (AAN.isValidState())
-          R = AAN.isAssumedNoAlias();
+        if (AAN->isValidState())
+          R = AAN->isAssumedNoAlias();
         else
           R = isNoAliasCall(&Obj);
         if (!R)
