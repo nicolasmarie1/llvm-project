@@ -51,6 +51,8 @@ def invoke_clang(is_cpp, is_mpi, args, targets, verbose, dry_run):
         "-foffload-lto",
         "-fopenmp-offload-mandatory",
         "-fopenmp-globalize-to-global-space",
+        "-I" if is_mpi else "",
+        cwd if is_mpi else "",
         "-include",
         os.path.join(cwd, "UserWrapper.h"),
         "-include" if is_mpi else "",
