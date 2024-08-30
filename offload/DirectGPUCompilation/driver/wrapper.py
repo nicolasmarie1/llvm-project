@@ -44,13 +44,13 @@ def compile_loader(loader_name, args, targets, verbose, dry_run):
         sys.exit(cp.returncode)
 
 
-def invoke_clang(is_cpp, is_mpi, args, targets, verbose, dry_run):
+def invoke_clang(is_cpp, is_mpi, is_compile, args, targets, verbose, dry_run):
     cmd = [
         "clang++" if is_cpp else "clang",
         "-fopenmp",
         "-foffload-lto",
         "-fopenmp-offload-mandatory",
-        "-fopenmp-globalize-to-global-space",
+        #"-fopenmp-globalize-to-global-space",
         "-I" if is_mpi else "",
         cwd if is_mpi else "",
         "-include",
@@ -58,7 +58,7 @@ def invoke_clang(is_cpp, is_mpi, args, targets, verbose, dry_run):
         "-include" if is_mpi else "",
         os.path.join(cwd, "mpi.h") if is_mpi else "",
         "--save-temps",
-        "-rdynamic",
+        "-rdynamic" if not is_compile else "",
         "-mllvm",
         "-enable-host-rpc",
         "-mllvm",
@@ -124,8 +124,10 @@ def run(is_cpp=False, is_mpi=False):
         print_version()
         return
 
+    is_compile = False
     if args.c:
         fwd_args.append("-c")
+        is_compile = True
     if args.v:
         fwd_args.append("-v")
 
@@ -140,7 +142,7 @@ def run(is_cpp=False, is_mpi=False):
         fwd_args.append(loader_name)
         temp_files.append(loader_name)
 
-    invoke_clang(is_cpp, is_mpi, fwd_args, args.offload_arch, args.v, dry_run)
+    invoke_clang(is_cpp, is_mpi, is_compile, fwd_args, args.offload_arch, args.v, dry_run)
 
     for f in temp_files:
         if os.path.isfile(f):
