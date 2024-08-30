@@ -9,6 +9,105 @@
 
 #include "Mpi.h"
 
+const int MPI_ANY_SOURCE = -1;
+const int MPI_ANY_TAG = -1;
+const int MPI_SUCCESS = 0;
+
+MPI_Comm MPI_COMM_WORLD;
+
+MPI_Status *MPI_STATUS_IGNORE;
+MPI_Status *MPI_STATUSES_IGNORE;
+
+// MPI_Operations
+template<typename T>
+void MPI_Sum_function(const T *invec, T *inoutvec, int *len){
+  for(int i = 0; i < *len; ++i){
+    *inoutvec = *invec + *inoutvec;
+    invec++; inoutvec++;
+  }
+}
+
+void MPI_Sum_function_wrapper(const void *invec, void *inoutvec, int *len, MPI_Datatype *datatype){
+  switch (*datatype) {
+    case MPI_INT: MPI_Sum_function<int>((int *) invec, (int *) inoutvec, len); break;
+    default:
+      assert(false && "MPI Sum Operation: Unknown MPI DataType");
+  }
+}
+
+template<typename T>
+void MPI_Min_function(const T *invec, T *inoutvec, int *len){
+  for(int i = 0; i < *len; ++i){
+    *inoutvec = *invec < *inoutvec ? *invec : *inoutvec;
+    invec++; inoutvec++;
+  }
+}
+
+void MPI_Min_function_wrapper(const void *invec, void *inoutvec, int *len, MPI_Datatype *datatype){
+  switch (*datatype) {
+    case MPI_INT: MPI_Min_function<int>((int *) invec, (int *) inoutvec, len); break;
+    default:
+      assert(false && "MPI Min Operation: Unknown MPI DataType");
+  }
+}
+
+template<typename T>
+void MPI_Max_function(const T *invec, T *inoutvec, int *len){
+  for(int i = 0; i < *len; ++i){
+    *inoutvec = *invec > *inoutvec ? *invec : *inoutvec;
+    invec++; inoutvec++;
+  }
+}
+
+void MPI_Max_function_wrapper(const void *invec, void *inoutvec, int *len, MPI_Datatype *datatype){
+  switch (*datatype) {
+    case MPI_INT: MPI_Max_function<int>((int *) invec, (int *) inoutvec, len); break;
+    default:
+      assert(false && "MPI Max Operation: Unknown MPI DataType");
+  }
+}
+
+template<typename T>
+void MPI_Min_Loc_function(const T *invec, int index, const T *current, int *outvec, int *len){
+  for(int i = 0; i < *len; ++i){
+    *outvec = *invec < *current ? index : *outvec;
+    invec++; current++; outvec++;
+  }
+}
+
+void MPI_Min_Loc_function_wrapper(const void *invec, int index, const void *current, int *outvec, int *len, MPI_Datatype *datatype){
+  switch (*datatype) {
+    case MPI_INT: MPI_Min_Loc_function<int>((int *) invec, index, (int *) current, outvec, len); break;
+    default:
+      assert(false && "MPI Min Loc Operation: Unknown MPI DataType");
+  }
+}
+
+template<typename T>
+void MPI_Max_Loc_function(const T *invec, int index, const T *current, int *outvec, int *len){
+  for(int i = 0; i < *len; ++i){
+    *outvec = *invec > *current ? index : *outvec;
+    invec++; current++; outvec++;
+  }
+}
+
+void MPI_Max_Loc_function_wrapper(const void *invec, int index, const void *current, int *outvec, int *len, MPI_Datatype *datatype){
+  switch (*datatype) {
+    case MPI_INT: MPI_Max_Loc_function<int>((int *) invec, index, (int *) current, outvec, len); break;
+    default:
+      assert(false && "MPI Min Loc Operation: Unknown MPI DataType");
+  }
+}
+
+
+MPI_Op MPI_MIN    { MPI_Min_function_wrapper, nullptr                      };
+MPI_Op MPI_MINLOC { nullptr                 , MPI_Min_Loc_function_wrapper };
+MPI_Op MPI_MAX    { MPI_Max_function_wrapper, nullptr                      };
+MPI_Op MPI_MAXLOC { nullptr                 , MPI_Max_Loc_function_wrapper };
+MPI_Op MPI_SUM    { MPI_Sum_function_wrapper, nullptr                      };
+
+MPI_Request MPI_REQUEST_NULL = 0;
+
 //using namespace ompx;
 
 // forward declaration of new
@@ -103,7 +202,7 @@ private:
 
 extern "C" {
 
-const int MPI_MAX_BUF_SEND = 8 * 512 * 1024;
+const int MPI_MAX_BUF_SEND = 0; //4 * 1024 * 1024;
 
 enum MPI_Request_type_e {
   MPI_SEND,
@@ -154,6 +253,8 @@ struct MPI_Comm_s {
   uint32_t barrier_generation_counter;
   int *ranks; // map teams to ranks
   struct mpiutils::LinkList<struct MPI_Message_s> *messagebox;
+  void const** reduce_buffer;
+  void *bcast_buffer;
 };
 
 }
@@ -169,7 +270,7 @@ void yield(void);
 void yield(void){
   // split kernel here (if it is ever implemented)
   //__ompx_split();
-  __builtin_amdgcn_s_sleep(1);
+  __builtin_amdgcn_s_sleep(2);
 }
 #pragma omp end declare variant
 
@@ -184,16 +285,60 @@ void yield(void){
 }
 #pragma omp end declare variant
 
-void barrier(uint32_t *counter, uint32_t *gen_counter, uint32_t size){
+//void barrier(uint32_t *counter, uint32_t *gen_counter, uint32_t size){
+//  int previous_gen = ompx::atomic::load(gen_counter, ompx::atomic::seq_cst);
+//  int current = ompx::atomic::inc(counter, size - 1,
+//                  ompx::atomic::seq_cst, ompx::atomic::MemScopeTy::device);
+//  if (current + 1 == size)
+//    ompx::atomic::add(gen_counter, 1, ompx::atomic::seq_cst);
+//  while(ompx::atomic::load(gen_counter, ompx::atomic::seq_cst) <= previous_gen){
+//    yield();
+//  }
+//}
+
+#define BLOCK_SIZE 8
+void *huge_memcpy(void *dest, const void *src, size_t count)
+{
+  if (false /*count > BLOCK_SIZE * 1024*/) { // fixe memory allocator first
+    #pragma omp parallel for schedule(static)
+    {
+      for (size_t i = 0; i < count; i += BLOCK_SIZE)
+      {
+        __builtin_memcpy((void *) ((uint64_t) dest + i), (void *) ((uint64_t) src + i), BLOCK_SIZE);
+      }
+    }
+    size_t left_over = count % BLOCK_SIZE;
+    __builtin_memcpy((void *) ((uint64_t) dest + count - left_over), (void *) ((uint64_t) src + count - left_over), left_over);
+  } else {
+    __builtin_memcpy(dest, src, count);
+  }
+  return dest;
+}
+
+//void *huge_memcpy(void *dest, const void *src, size_t count)
+//{
+//  return __builtin_memcpy(dest, src, count);
+//}
+
+uint32_t barrier_start(uint32_t *counter, uint32_t *gen_counter, uint32_t size){
   int previous_gen = ompx::atomic::load(gen_counter, ompx::atomic::seq_cst);
   int current = ompx::atomic::inc(counter, size - 1,
                   ompx::atomic::seq_cst, ompx::atomic::MemScopeTy::device);
   if (current + 1 == size)
     ompx::atomic::add(gen_counter, 1, ompx::atomic::seq_cst);
+  return previous_gen;
+}
+
+void barrier_end(uint32_t *gen_counter, uint32_t previous_gen){
   while(ompx::atomic::load(gen_counter, ompx::atomic::seq_cst) <= previous_gen){
     yield();
   }
 }
+
+void barrier(uint32_t *counter, uint32_t *gen_counter, uint32_t size){
+  barrier_end(gen_counter, barrier_start(counter, gen_counter, size));
+}
+
 
 size_t mpi_type_size(MPI_Datatype datatype){
   switch(datatype){
@@ -235,6 +380,14 @@ size_t mpi_type_size(MPI_Datatype datatype){
   //case MPI_CXX_FLOAT_COMPLEX      : return sizeof(std::complex<float>)      ;
   //case MPI_CXX_DOUBLE_COMPLEX     : return sizeof(std::complex<double>)     ;
   //case MPI_CXX_LONG_DOUBLE_COMPLEX: return sizeof(std::complex<long double>);
+
+// Reduce Data Type
+    case MPI_FLOAT_INT              : return sizeof(float)                    ;
+    case MPI_DOUBLE_INT             : return sizeof(int)                      ;
+    case MPI_LONG_INT               : return sizeof(long)                     ;
+    case MPI_2INT                   : return sizeof(int)                      ;
+    case MPI_SHORT_INT              : return sizeof(int)                      ;
+    case MPI_LONG_DOUBLE_INT        : return sizeof(double)                   ;
     default:
       __builtin_unreachable();
   }
@@ -288,6 +441,7 @@ struct MPI_Recv_Request_s *mpi_recv_init(
   req->mpi_status.MPI_SOURCE  = MPI_ANY_SOURCE;
   req->mpi_status.MPI_TAG     = MPI_ANY_TAG;
   req->mpi_status.MPI_ERROR   = MPI_SUCCESS;
+  req->mpi_status.count       = 0;
 
   mpi_req_init(count, datatype, send_rank, tag, comm, MPI_RECV, req);
 
@@ -334,7 +488,7 @@ struct MPI_Message_s *mpi_send(
 
   if (buffered){
     msg->buf_data = malloc(data_size);
-    memcpy(msg->buf_data, buf, data_size);
+    huge_memcpy(msg->buf_data, buf, data_size);
   } else {
     msg->send_data = buf;
   }
@@ -409,15 +563,16 @@ void __mpi_recv_do(struct MPI_Message_s *msg, void *buf, MPI_Status *status)
   int data_size = mpi_type_size(msg->datatype) * msg->count;
 
   if (msg->buffered) {
-    memcpy(buf, msg->buf_data, data_size);
+    huge_memcpy(buf, msg->buf_data, data_size);
     free(msg->buf_data);
   } else {
-    memcpy(buf, msg->send_data, data_size);
+    huge_memcpy(buf, msg->send_data, data_size);
   }
 
-  if (status != &MPI_STATUS_IGNORE && status != &MPI_STATUSES_IGNORE) {
+  if (status != MPI_STATUS_IGNORE) {
     status->MPI_SOURCE = msg->rank;
-    status->MPI_TAG = msg->tag;
+    status->MPI_TAG    = msg->tag;
+    status->count      = msg->count;
   }
 
   if (msg->buffered)
@@ -496,7 +651,7 @@ bool mpi_req_test(struct MPI_Request_s **reqp){
   bool res = false;
   switch (req->req_type) {
     case (MPI_SEND):
-      res =  mpi_send_test(static_cast<struct MPI_Send_Request_s *>(req));
+      res = mpi_send_test(static_cast<struct MPI_Send_Request_s *>(req));
       break;
     case (MPI_RECV):
       res = mpi_recv_test(static_cast<struct MPI_Recv_Request_s *>(req));
@@ -530,10 +685,11 @@ void mpi_req_wait(struct MPI_Request_s **reqp){
 
 void mpi_req_deactivte(struct MPI_Request_s **reqp, MPI_Status *status) {
   struct MPI_Request_s *req = *reqp;
-  if (status != &MPI_STATUS_IGNORE) {
+  if (status != MPI_STATUS_IGNORE) {
     status->MPI_SOURCE  = req->mpi_status.MPI_SOURCE;
     status->MPI_TAG     = req->mpi_status.MPI_TAG;
     status->MPI_ERROR   = req->mpi_status.MPI_ERROR;
+    status->count       = req->mpi_status.count;
   }
   if (req->persistent) {
     req->enable = false;
@@ -542,6 +698,53 @@ void mpi_req_deactivte(struct MPI_Request_s **reqp, MPI_Status *status) {
   }
 }
 
+// MPI Bcast
+int mpi_bcast(void *buffer, int count, MPI_Datatype datatype, int root, MPI_Comm comm)
+{
+  if (mpi_rank(comm) ==  root)
+    comm->bcast_buffer = buffer;
+  barrier(&comm->barrier_counter, &comm->barrier_generation_counter, comm->size);
+  //if (mpi_rank(comm) != root) // maybe remove ?
+  huge_memcpy(buffer, comm->bcast_buffer, count * mpi_type_size(datatype));
+  barrier(&comm->barrier_counter, &comm->barrier_generation_counter, comm->size);
+  return 0;
+}
+
+
+// Mpi Reduces
+int mpi_reduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype datatype, MPI_Op op, int root, MPI_Comm comm)
+{
+  comm->reduce_buffer[mpi_rank(comm)] = sendbuf;
+  barrier(&comm->barrier_counter, &comm->barrier_generation_counter, comm->size);
+  if (mpi_rank(comm) == root) {
+    size_t size = comm->size * mpi_type_size(datatype);
+    if (op.func_user != nullptr){
+      void *tmpbuf = malloc(size);
+      memcpy(tmpbuf, comm->reduce_buffer[0], size);
+      for (size_t i = 1; i < comm->size; ++i)
+        op.func_user(comm->reduce_buffer[i], tmpbuf, &count, &datatype);
+      memcpy(recvbuf, tmpbuf, size);
+    } else {
+      size_t indexs_size = comm->size * sizeof(int);
+      void *tmpbuf   =        malloc(size);
+      int  *indexbuf = (int*) malloc(indexs_size);
+      memset(indexbuf, 0, indexs_size);
+      memcpy(tmpbuf, comm->reduce_buffer[0], size);
+      for (size_t i = 0; i < comm->size; ++i)
+        op.func_loc(comm->reduce_buffer[i], i, tmpbuf, indexbuf, &count, &datatype);
+      memcpy(recvbuf, indexbuf, indexs_size);
+    }
+  }
+  barrier(&comm->barrier_counter, &comm->barrier_generation_counter, comm->size);
+  return 0;
+}
+
+int mpi_all_reduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype datatype, MPI_Op op, MPI_Comm comm)
+{
+  mpi_reduce(sendbuf, recvbuf, count, datatype, op, 0, comm);
+  mpi_bcast(recvbuf, count, datatype, 0, comm);
+  return 0;
+}
 
 } // namespace impl
 
@@ -551,8 +754,7 @@ extern "C" {
 uint32_t global_counter = 0;
 uint32_t global_generation_counter = 0;
 
-
-int MPI_Init(int *argc, char **argv){
+int MPI_Init(int *argc, char ***argv){
   (void) argc;
   (void) argv;
 
@@ -572,6 +774,9 @@ int MPI_Init(int *argc, char **argv){
             reinterpret_cast<struct mpiutils::LinkList<struct MPI_Message_s> *>(
             malloc(MPI_COMM_WORLD->size
                 * sizeof(struct mpiutils::LinkList<struct MPI_Message_s>)));
+    MPI_COMM_WORLD->reduce_buffer = reinterpret_cast<void const**>(
+                malloc(MPI_COMM_WORLD->size * sizeof(void *)));
+    //MPI_SUM.func = MPI_Sum_function;
   }
 
   impl::barrier(&global_counter, &global_generation_counter,
@@ -592,7 +797,7 @@ int MPI_Init_thread(int *argc, char ***argv, int required, int *provided)
     return 1; //TODO; Return proper MPI_Error
   *provided = MPI_THREAD_FUNNELED;
 
-  return MPI_Init(argc, *argv);
+  return MPI_Init(argc, argv);
 }
 
 int MPI_Finalize(void){
@@ -601,6 +806,7 @@ int MPI_Finalize(void){
   if(omp_get_team_num() == 0){
     free(MPI_COMM_WORLD->ranks);
     free(MPI_COMM_WORLD->messagebox);
+    free(MPI_COMM_WORLD->reduce_buffer);
     free(MPI_COMM_WORLD);
   }
   return 0;
@@ -645,7 +851,6 @@ int MPI_Send(const void *buf, int count, MPI_Datatype datatype, int dest, int ta
 
 int MPI_Ssend(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm)
 {
-
   impl::mpi_send(buf, count, datatype, dest, tag, comm, false, true);
   return 0;
 }
@@ -660,6 +865,42 @@ int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, M
 {
   impl::mpi_recv(buf, count, datatype, source, tag, comm, status);
   return 0;
+}
+
+int MPI_Sendrecv(const void *sendbuf, int sendcount, MPI_Datatype sendtype, int dest, int sendtag, void *recvbuf, int recvcount, MPI_Datatype recvtype, int source, int recvtag, MPI_Comm comm, MPI_Status *status)
+{
+  MPI_Request requests[2];
+  MPI_Status  req_status[2];
+
+  MPI_Isend(sendbuf, sendcount, sendtype, dest,   sendtag, comm, &requests[0]);
+  MPI_Irecv(recvbuf, recvcount, recvtype, source, recvtag, comm, &requests[1]);
+
+  MPI_Waitall(2, requests, req_status);
+
+  *status = req_status[1];
+
+  return 0;
+}
+
+int MPI_Sendrecv_replace(void *buf, int count, MPI_Datatype datatype, int dest, int sendtag, int source, int recvtag, MPI_Comm comm, MPI_Status *status)
+{
+  MPI_Request requests[2];
+  MPI_Status  req_status[2];
+
+  size_t size = count * impl::mpi_type_size(datatype);
+  void *recvbuf = malloc(size);
+
+  MPI_Isend(buf, count, datatype, dest,   sendtag, comm, &requests[0]);
+  MPI_Irecv(recvbuf, count, datatype, source, recvtag, comm, &requests[1]);
+
+  MPI_Waitall(2, requests, req_status);
+
+  *status = req_status[1];
+  impl::huge_memcpy(buf, recvbuf, size);
+  free(recvbuf);
+
+  return 0;
+
 }
 
 // Non-Blocking Communications
@@ -726,7 +967,8 @@ int MPI_Testall(int count, MPI_Request array_of_requests[], int *flag, MPI_Statu
   *flag = (finished == count);
   if (*flag)
     for (int i = 0; i < count; ++i)
-      impl::mpi_req_deactivte(&array_of_requests[i], &array_of_statuses[i]);
+      impl::mpi_req_deactivte(&array_of_requests[i],
+        array_of_statuses == MPI_STATUSES_IGNORE ? MPI_STATUS_IGNORE : &array_of_statuses[i]);
   return 0;
 }
 
@@ -742,7 +984,8 @@ int MPI_Waitall(int count, MPI_Request array_of_requests[], MPI_Status array_of_
     impl::yield();
   }
   for (int i = 0; i < count; ++i)
-    impl::mpi_req_deactivte(&array_of_requests[i], &array_of_statuses[i]);
+    impl::mpi_req_deactivte(&array_of_requests[i],
+      array_of_statuses == MPI_STATUSES_IGNORE ? MPI_STATUS_IGNORE : &array_of_statuses[i]);
   return 0;
 }
 
@@ -782,7 +1025,7 @@ int MPI_Testsome(int incount, MPI_Request array_of_requests[], int *outcount, in
     if(impl::mpi_req_test(&array_of_requests[i])) {
       array_of_indices[*outcount] = i;
       impl::mpi_req_deactivte(&array_of_requests[i],
-                              &array_of_statuses[*outcount]);
+        array_of_statuses == MPI_STATUSES_IGNORE ? MPI_STATUS_IGNORE :  &array_of_statuses[*outcount]);
       (*outcount)++;
     }
   }
@@ -859,23 +1102,55 @@ int MPI_Request_free(MPI_Request *request)
   return 0;
 }
 
+int MPI_Get_count(const MPI_Status *status, MPI_Datatype datatype, int *count)
+{
+  return status->count;
+}
+
 // Collective Operation
+int MPI_Bcast(void *buffer, int count, MPI_Datatype datatype, int root, MPI_Comm comm)
+{
+  return impl::mpi_bcast(buffer, count, datatype, root, comm);
+}
+
 int MPI_Reduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype datatype, MPI_Op op, int root, MPI_Comm comm)
 {
-  // TODO; Implement MPI_Reduce
-  return 0;
+  return impl::mpi_reduce(sendbuf, recvbuf, count, datatype, op, root, comm);
 }
 
 int MPI_Allreduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype datatype, MPI_Op op, MPI_Comm comm)
 {
-  // TODO; Implement MPI_Allreduce
-  return 0;
+  return impl::mpi_all_reduce(sendbuf, recvbuf, count, datatype, op, comm);
 }
 
-// double
+// Others
 double MPI_Wtime(void)
 {
   return omp_get_wtime(); // thx openmp
+}
+
+int MPI_Get_version(int *version, int *subversion)
+{
+  *version    = 4;
+  *subversion = 1;
+  return 0;
+}
+
+// Memory Allocations
+int MPI_Alloc_mem(MPI_Aint size, MPI_Info info, void **baseptr)
+{
+  *baseptr = malloc(size);
+  if (*baseptr == nullptr){
+    printf("alloc: %p\n", baseptr); //if we remove this print, the optimisation break every things
+    return 1;
+  }
+  return 0;
+}
+
+int MPI_Free_mem(void *base)
+{
+  free(base);
+  return 0;
 }
 
 

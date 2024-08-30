@@ -5,16 +5,9 @@
 extern "C" {
 #endif
 
-//struct MPI_Comm_s;
-//struct MPI_Comm_s {
-//  int id; // id = 0 -> MPI_COMM_WORLD (the only supported)
-//  uint32_t size;
-//  uint32_t barrier_counter;
-//  uint32_t barrier_generation_counter;
-//  uint32_t *nodes_infos;
-//};
+typedef uint64_t MPI_Aint;
+
 typedef struct MPI_Comm_s *MPI_Comm;
-MPI_Comm MPI_COMM_WORLD;
 
 typedef enum MPI_Datatype_e {
   MPI_CHAR,
@@ -51,10 +44,19 @@ typedef enum MPI_Datatype_e {
 //MPI_AINT,
 //MPI_OFFSET,
 //MPI_COUNT,
-  MPI_CXX_BOOL
+  MPI_CXX_BOOL,
 //MPI_CXX_FLOAT_COMPLEX,
 //MPI_CXX_DOUBLE_COMPLEX,
 //MPI_CXX_LONG_DOUBLE_COMPLEX,
+
+// Reduce Data Type
+  MPI_FLOAT_INT,
+  MPI_DOUBLE_INT,
+  MPI_LONG_INT,
+  MPI_2INT,
+  MPI_SHORT_INT,
+  MPI_LONG_DOUBLE_INT
+
 } MPI_Datatype;
 
 typedef enum MPI_Intent_e {
@@ -64,38 +66,55 @@ typedef enum MPI_Intent_e {
   MPI_THREAD_MULTIPLE
 } MPI_Intent;
 
-typedef void MPI_User_function(void *invec, void *inoutvec, int *len, MPI_Datatype *datatype);
+typedef void MPI_User_function(const void *invec, void *inoutvec, int *len, MPI_Datatype *datatype);
+typedef void MPI_Loc_User_function(const void *invec, int index, const void *current, int *outvec, int *len, MPI_Datatype * datatype);
 
 typedef struct MPI_Op_s {
-  MPI_User_function *func;
+  MPI_User_function *func_user;
+  MPI_Loc_User_function *func_loc;
 } MPI_Op;
 
 typedef struct MPI_Status_s {
   int MPI_SOURCE;
   int MPI_TAG;
   int MPI_ERROR;
+  int count;
 } MPI_Status;
 
 typedef struct MPI_Request_s *MPI_Request;
 
-//const MPI_Status MPI_STATUS_IGNORE;
-//const MPI_Status MPI_STATUSES_IGNORE;
+typedef enum MPI_Errhandler_e {
+  MPI_ERRORS_ARE_FATAL,
+  MPI_ERRORS_ABORT,
+  MPI_ERRORS_RETURN
+} MPI_Errhandler;
 
-// global variables
-const int MPI_ANY_SOURCE = -1;
-const int MPI_ANY_TAG = -1;
-const int MPI_SUCCESS = 0;
+typedef struct MPI_Info_s {
+  int info; //TODO implement MPI Infos
+} MPI_Info;
 
-MPI_Status MPI_STATUS_IGNORE;
-MPI_Status MPI_STATUSES_IGNORE;
+// global variables[MaQ
+extern const int MPI_ANY_SOURCE;
+extern const int MPI_ANY_TAG;
+extern const int MPI_SUCCESS;
 
-MPI_Op MPI_MIN;
-MPI_Op MPI_MAX;
+extern MPI_Comm MPI_COMM_WORLD;
 
-MPI_Request MPI_REQUEST_NULL = 0;
+extern MPI_Status *MPI_STATUS_IGNORE;
+extern MPI_Status *MPI_STATUSES_IGNORE;
+
+extern MPI_Op MPI_MIN;
+extern MPI_Op MPI_MINLOC;
+extern MPI_Op MPI_MAX;
+extern MPI_Op MPI_MAXLOC;
+extern MPI_Op MPI_SUM;
+
+extern MPI_Request MPI_REQUEST_NULL;
+
+extern MPI_Info MPI_INFO_NULL;
 
 // Common  functions
-int MPI_Init(int *argc, char **argv);
+int MPI_Init(int *argc, char ***argv);
 int MPI_Init_thread(int *argc, char ***argv, int required, int *provided);
 int MPI_Finalize(void);
 int MPI_Abort(MPI_Comm comm, int errorcode);
@@ -113,6 +132,11 @@ int MPI_Send(const void *buf, int count, MPI_Datatype datatype, int dest, int ta
 int MPI_Ssend(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm);
 int MPI_Bsend(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm);
 int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status *status);
+
+int MPI_Sendrecv(const void *sendbuf, int sendcount, MPI_Datatype sendtype, int dest, int sendtag, void *recvbuf, int recvcount, MPI_Datatype recvtype, int source, int recvtag, MPI_Comm comm, MPI_Status *status);
+int MPI_Sendrecv_replace(void *buf, int count, MPI_Datatype datatype, int dest, int sendtag, int source, int recvtag, MPI_Comm comm, MPI_Status *status);
+
+
 
 // Non Blocking Comm
 int MPI_Isend(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm, MPI_Request *request);
@@ -143,12 +167,20 @@ int MPI_Start(MPI_Request *request);
 int MPI_Startall(int count, MPI_Request array_of_requests[]);
 int MPI_Request_free(MPI_Request *request);
 
-// Collective Operation
+int MPI_Get_count(const MPI_Status *status, MPI_Datatype datatype, int *count);
+
+// Collective Operations
+int MPI_Bcast(void *buffer, int count, MPI_Datatype datatype, int root, MPI_Comm comm);
 int MPI_Reduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype datatype, MPI_Op op, int root, MPI_Comm comm);
 int MPI_Allreduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype datatype, MPI_Op op, MPI_Comm comm);
 
-// Uknow
+// Others
 double MPI_Wtime(void);
+int MPI_Get_version(int *version, int *subversion);
+
+// Memory Allocations
+int MPI_Alloc_mem(MPI_Aint size, MPI_Info info, void **baseptr);
+int MPI_Free_mem(void *base);
 
 #ifdef  __cplusplus
 }
