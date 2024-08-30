@@ -18,6 +18,7 @@
 #include "Synchronization.h"
 #include "Types.h"
 #include "Utils.h"
+#include "Interface.h"
 
 using namespace ompx;
 
@@ -31,15 +32,17 @@ using namespace ompx;
 
 namespace {
 constexpr const size_t Alignment = 16;
-constexpr const size_t FirstThreadRatio = 40;
+constexpr const size_t FirstThreadTeamRatio = 40;
+constexpr const size_t FirstThreadWarpRatio = 40;
 constexpr const size_t SplitThreadhold = Alignment * 4;
 
 template <typename T> T abs(T V) { return V > 0 ? V : -V; }
 
-template <uint32_t WARP_SIZE, uint32_t TEAM_SIZE> struct WarpAllocator;
+//template <uint32_t WARP_SIZE, uint32_t TEAM_SIZE> struct WarpAllocator;
+template <uint32_t MAX_TEAM_SIZE> struct WarpAllocator;
 
 class WarpAllocatorEntry {
-  template <uint32_t WARP_SIZE, uint32_t TEAM_SIZE> friend struct WarpAllocator;
+  template <uint32_t MAX_TEAM_SIZE> friend struct WarpAllocator;
 
   /// If Size is less than 0, the entry is allocated (in use).
   int64_t Size = 0;
@@ -88,7 +91,8 @@ public:
 
 static_assert(sizeof(WarpAllocatorEntry) == 16, "entry size mismatch");
 
-template <uint32_t WARP_SIZE, uint32_t TEAM_SIZE> struct WarpAllocator {
+//template <uint32_t WARP_SIZE, uint32_t TEAM_SIZE> struct WarpAllocator {
+template <uint32_t MAX_TEAM_SIZE> struct WarpAllocator {
   void init() {
     if (mapping::isSPMDMode() &&
         (mapping::getThreadIdInBlock() || mapping::getBlockIdInKernel()))
@@ -96,25 +100,30 @@ template <uint32_t WARP_SIZE, uint32_t TEAM_SIZE> struct WarpAllocator {
 
     size_t HeapSize = __omp_rtl_device_memory_pool.Size;
 
-    FirstThreadHeapSize = HeapSize * FirstThreadRatio / 100;
+    FirstThreadHeapSize = HeapSize * FirstThreadWarpRatio / 100;
     FirstThreadHeapSize = utils::align_down(FirstThreadHeapSize, Alignment);
     size_t OtherThreadHeapSize =
-        (HeapSize - FirstThreadHeapSize) / (WARP_SIZE - 1);
+        (HeapSize - FirstThreadHeapSize) / (mapping::getWarpSize() - 1);
     OtherThreadHeapSize = utils::align_down(OtherThreadHeapSize, Alignment);
 
-    size_t TeamHeapSize = FirstThreadHeapSize / TEAM_SIZE;
+    size_t TeamHeapSize = FirstThreadHeapSize / mapping::getMaxTeamWarps();
     TeamHeapSize = utils::align_down(TeamHeapSize, Alignment);
     FirstTeamSize = TeamHeapSize;
 
+    printf("Team Size: %d, WarpSize: %d, ThreadinBlock: %d\n", mapping::getMaxTeamWarps(), mapping::getWarpSize(), mapping::getMaxTeamWarps() * mapping::getWarpSize());
+    printf("TeamAllocator Init: Total Team Memory Size (%ldMB), 1st Thread in Warp (%ldMB), Any thread in warp(%ldMB)\n",
+        HeapSize / (1024 * 1024), TeamHeapSize / (1024 * 1024), OtherThreadHeapSize / (1024 * 1024));
+
     char *LastLimit = reinterpret_cast<char *>(__omp_rtl_device_memory_pool.Ptr);
-    for (int I = 0; I < WARP_SIZE; ++I) {
-      for (int J = 0; J < TEAM_SIZE; ++J) {
-        Entries[I][J] = nullptr;
-        Limits[I][J] = LastLimit + TeamHeapSize * (J + 1);
+    for (int I = 0; I < mapping::getWarpSize(); ++I) {
+      for (int J = 0; J < mapping::getMaxTeamWarps(); ++J) {
+        Entries[I * mapping::getMaxTeamWarps() + J] = nullptr;
+        Limits[I * mapping::getMaxTeamWarps() + J] = LastLimit + TeamHeapSize * (J + 1);
       }
       LastLimit += I ? OtherThreadHeapSize : FirstThreadHeapSize;
-      Limits[I][TEAM_SIZE - 1] = LastLimit;
-      TeamHeapSize = OtherThreadHeapSize / TEAM_SIZE;
+      Limits[I * mapping::getMaxTeamWarps() + mapping::getMaxTeamWarps() - 1] =
+          LastLimit;
+      TeamHeapSize = OtherThreadHeapSize / mapping::getMaxTeamWarps();
       TeamHeapSize = utils::align_down(TeamHeapSize, Alignment);
     }
   }
@@ -131,13 +140,13 @@ template <uint32_t WARP_SIZE, uint32_t TEAM_SIZE> struct WarpAllocator {
 
     WarpAllocatorEntry *E = nullptr;
     {
-      mutex::LockGuard LG(Locks[TIdInWarp][TeamSlot]);
+      mutex::LockGuard LG(Locks[TIdInWarp * mapping::getMaxTeamWarps() + TeamSlot]);
 
-      auto *LastEntry = Entries[TIdInWarp][TeamSlot];
+      auto *LastEntry = Entries[TIdInWarp * mapping::getMaxTeamWarps() + TeamSlot];
       auto *NewWatermark = (LastEntry ? LastEntry->getEndPtr()
                                       : getBlockBegin(TIdInWarp, TeamSlot)) +
                            Size;
-      if (NewWatermark >= Limits[TIdInWarp][TeamSlot]) {
+      if (NewWatermark >= Limits[TIdInWarp * mapping::getMaxTeamWarps() + TeamSlot]) {
         E = findMemorySlow(Size, TIdInWarp, TeamSlot);
       } else {
         E = LastEntry ? LastEntry->getNext()
@@ -145,7 +154,7 @@ template <uint32_t WARP_SIZE, uint32_t TEAM_SIZE> struct WarpAllocator {
                             getBlockBegin(TIdInWarp, TeamSlot));
         E->setSize(Size);
         E->setPrevSize(LastEntry);
-        Entries[TIdInWarp][TeamSlot] = E;
+        Entries[TIdInWarp * mapping::getMaxTeamWarps() + TeamSlot] = E;
       }
 
       if (!E)
@@ -163,14 +172,16 @@ template <uint32_t WARP_SIZE, uint32_t TEAM_SIZE> struct WarpAllocator {
     auto TeamSlot = getTeamSlot();
     auto TIdInWarp = mapping::getThreadIdInWarp();
 
-    mutex::LockGuard LG(Locks[TIdInWarp][TeamSlot]);
+    mutex::LockGuard LG(Locks[TIdInWarp * mapping::getMaxTeamWarps() + TeamSlot]);
+    if (E->isUnused())
+      return;
     E->setUnused();
     // Is last entry?
-    if (E == Entries[TIdInWarp][TeamSlot]) {
+    if (E == Entries[TIdInWarp * mapping::getMaxTeamWarps() + TeamSlot]) {
       do {
         E = E->getPrev();
       } while (!E->isFirst() && !E->isUsed());
-      Entries[TIdInWarp][TeamSlot] = E;
+      Entries[TIdInWarp * mapping::getMaxTeamWarps() + TeamSlot] = E;
     }
   }
 
@@ -181,15 +192,15 @@ template <uint32_t WARP_SIZE, uint32_t TEAM_SIZE> struct WarpAllocator {
 
     auto TeamSlot = getTeamSlot();
     auto TIdInWarp = mapping::getThreadIdInWarp();
-    for (int I = TIdInWarp; I < TIdInWarp + WARP_SIZE; ++I) {
-      int TId = I % WARP_SIZE;
-      for (int J = TeamSlot; J < TeamSlot + TEAM_SIZE; ++J) {
-        int SId = J % TEAM_SIZE;
+    for (int I = TIdInWarp; I < TIdInWarp + mapping::getWarpSize(); ++I) {
+      int TId = I % mapping::getWarpSize();
+      for (int J = TeamSlot; J < TeamSlot + mapping::getMaxTeamWarps(); ++J) {
+        int SId = J % mapping::getMaxTeamWarps();
         if (P < getBlockBegin(TId, SId) || P >= getBlockEnd(TId, SId))
           continue;
 
-        mutex::LockGuard LG(Locks[I][SId]);
-        WarpAllocatorEntry *E = Entries[I][SId];
+        mutex::LockGuard LG(Locks[I * mapping::getMaxTeamWarps() + SId]);
+        WarpAllocatorEntry *E = Entries[I * mapping::getMaxTeamWarps() + SId];
         if (!E)
           return {};
         if (E->getEndPtr() <= P)
@@ -210,15 +221,16 @@ template <uint32_t WARP_SIZE, uint32_t TEAM_SIZE> struct WarpAllocator {
   }
 
 private:
+
   char *getBlockBegin(int32_t TIdInWarp, int32_t TeamSlot) const {
     if (TeamSlot)
-      return Limits[TIdInWarp][TeamSlot - 1];
+      return Limits[TIdInWarp * mapping::getMaxTeamWarps() + TeamSlot - 1];
     if (TIdInWarp)
-      return Limits[TIdInWarp - 1][TEAM_SIZE - 1];
+      return Limits[(TIdInWarp - 1) * mapping::getMaxTeamWarps() + mapping::getMaxTeamWarps() - 1];
     return reinterpret_cast<char *>(__omp_rtl_device_memory_pool.Ptr);
   }
   char *getBlockEnd(int32_t TIdInWarp, int32_t TeamSlot) const {
-    return Limits[TIdInWarp][TeamSlot];
+    return Limits[TIdInWarp * mapping::getMaxTeamWarps() + TeamSlot];
   }
 
   size_t getBlockSize(int32_t TIdInWarp, int32_t TeamSlot) const {
@@ -226,7 +238,8 @@ private:
            getBlockBegin(TIdInWarp, TeamSlot);
   }
 
-  static int32_t getTeamSlot() { return mapping::getBlockIdInKernel() % TEAM_SIZE; }
+  int32_t getTeamSlot() { return mapping::getBlockIdInKernel() % 
+    mapping::getMaxTeamWarps(); }
 
   WarpAllocatorEntry *findMemorySlow(size_t Size, int32_t TIdInWarp,
                                      int32_t TeamSlot) {
@@ -255,14 +268,15 @@ private:
     return E;
   }
 
-  WarpAllocatorEntry *Entries[WARP_SIZE][TEAM_SIZE];
-  char *Limits[WARP_SIZE][TEAM_SIZE];
-  mutex::TicketLock Locks[WARP_SIZE][TEAM_SIZE];
+  WarpAllocatorEntry *Entries[MAX_TEAM_SIZE]; //[WARP_SIZE][TEAM_SIZE];
+  char *Limits[MAX_TEAM_SIZE]; //[WARP_SIZE][TEAM_SIZE];
+  mutex::TicketLock Locks[MAX_TEAM_SIZE]; //[WARP_SIZE][TEAM_SIZE];
   size_t FirstThreadHeapSize;
   size_t FirstTeamSize;
 };
 
-WarpAllocator<32, 16> Allocator;
+// Max team size (hread blocl size)
+WarpAllocator<1024> Allocator;
 
 } // namespace
 
