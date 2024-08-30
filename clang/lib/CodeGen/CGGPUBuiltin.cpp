@@ -64,6 +64,28 @@ llvm::Function *GetOpenMPVprintfDeclaration(CodeGenModule &CGM) {
       VprintfFuncType, llvm::GlobalVariable::ExternalLinkage, Name, &M);
 }
 
+llvm::Function *GetOpenMPVfprintfDeclaration(CodeGenModule &CGM) {
+  const char *Name = "__llvm_omp_vfprintf";
+  llvm::Module &M = CGM.getModule();
+  llvm::Type *ArgTypes[] = {llvm::PointerType::getUnqual(M.getContext()),
+                            llvm::PointerType::getUnqual(M.getContext()),
+                            llvm::PointerType::getUnqual(M.getContext()),
+                            llvm::Type::getInt32Ty(M.getContext())};
+  llvm::FunctionType *VfprintfFuncType = llvm::FunctionType::get(
+      llvm::Type::getInt32Ty(M.getContext()), ArgTypes, false);
+
+  if (auto *F = M.getFunction(Name)) {
+    if (F->getFunctionType() != VfprintfFuncType) {
+      CGM.Error(SourceLocation(),
+                "Invalid type declaration for __llvm_omp_vfprintf");
+      return nullptr;
+    }
+    return F;
+  }
+
+  return llvm::Function::Create(
+      VfprintfFuncType, llvm::GlobalVariable::ExternalLinkage, Name, &M);
+}
 // Transforms a call to printf into a call to the NVPTX vprintf syscall (which
 // isn't particularly special; it's invoked just like a regular function).
 // vprintf takes two args: A format string, and a pointer to a buffer containing
@@ -170,6 +192,46 @@ RValue EmitDevicePrintfCallExpr(const CallExpr *E, CodeGenFunction *CGF,
   }
   return RValue::get(Builder.CreateCall(Decl, Vec));
 }
+
+RValue EmitDeviceFPrintfCallExpr(const CallExpr *E, CodeGenFunction *CGF,
+                                llvm::Function *Decl, bool WithSizeArg) {
+  CodeGenModule &CGM = CGF->CGM;
+  CGBuilderTy &Builder = CGF->Builder;
+  assert(E->getBuiltinCallee() == Builtin::BIfprintf ||
+         E->getBuiltinCallee() == Builtin::BI__builtin_fprintf);
+  assert(E->getNumArgs() >= 2); // fprintf always has at least one arg.
+
+  // Uses the same format as nvptx for the argument packing, but also passes
+  // an i32 for the total size of the passed pointer
+  CallArgList Args;
+  CGF->EmitCallArgs(Args,
+                    E->getDirectCallee()->getType()->getAs<FunctionProtoType>(),
+                    E->arguments(), E->getDirectCallee(),
+                    /* ParamsToSkip = */ 0);
+
+  // We don't know how to emit non-scalar varargs.
+  if (containsNonScalarVarargs(CGF, Args)) {
+    CGM.ErrorUnsupported(E, "non-scalar arg to printf");
+    return RValue::get(llvm::ConstantInt::get(CGF->IntTy, 0));
+  }
+
+  auto r = packArgsIntoNVPTXFormatBuffer(CGF, Args);
+  llvm::Value *BufferPtr = r.first;
+
+  llvm::SmallVector<llvm::Value *, 3> Vec = {
+      Args[0].getRValue(*CGF).getScalarVal(), BufferPtr};
+  if (WithSizeArg) {
+    // Passing > 32bit of data as a local alloca doesn't work for nvptx or
+    // amdgpu
+    llvm::Constant *Size =
+        llvm::ConstantInt::get(llvm::Type::getInt32Ty(CGM.getLLVMContext()),
+                               static_cast<uint32_t>(r.second.getFixedValue()));
+
+    Vec.push_back(Size);
+  }
+  return RValue::get(Builder.CreateCall(Decl, Vec));
+}
+
 } // namespace
 
 RValue CodeGenFunction::EmitNVPTXDevicePrintfCallExpr(const CallExpr *E) {
@@ -218,3 +280,11 @@ RValue CodeGenFunction::EmitOpenMPDevicePrintfCallExpr(const CallExpr *E) {
   return EmitDevicePrintfCallExpr(E, this, GetOpenMPVprintfDeclaration(CGM),
                                   true);
 }
+
+RValue CodeGenFunction::EmitOpenMPDeviceFPrintfCallExpr(const CallExpr *E) {
+  assert(getTarget().getTriple().isNVPTX() ||
+         getTarget().getTriple().isAMDGCN());
+  return EmitDeviceFPrintfCallExpr(E, this, GetOpenMPVfprintfDeclaration(CGM),
+                                  true);
+}
+

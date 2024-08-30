@@ -16,8 +16,11 @@ using namespace ompx;
 
 #pragma omp begin declare target device_type(nohost)
 
+struct FILE;
+
 namespace impl {
 int32_t omp_vprintf(const char *Format, void *Arguments, uint32_t);
+int32_t omp_vfprintf(FILE* stream, const char *Format, void *Arguments, uint32_t Size);
 }
 
 #pragma omp begin declare variant match(                                       \
@@ -27,6 +30,9 @@ extern "C" int32_t vprintf(const char *, void *);
 namespace impl {
 int32_t omp_vprintf(const char *Format, void *Arguments, uint32_t) {
   return vprintf(Format, Arguments);
+}
+int32_t omp_vfprintf(FILE* stream, const char *Format, void *Arguments, uint32_t Size) {
+  return -1;
 }
 } // namespace impl
 #pragma omp end declare variant
@@ -42,11 +48,17 @@ namespace impl {
 int32_t omp_vprintf(const char *Format, void *Arguments, uint32_t Size) {
   return rpc_fprintf(stdout, Format, Arguments, Size);
 }
+int32_t omp_vfprintf(FILE* stream, const char *Format, void *Arguments, uint32_t Size) {
+  return rpc_fprintf(stream, Format, Arguments, Size);
+}
 } // namespace impl
 #else
 // We do not have a vprintf implementation for AMD GPU so we use a stub.
 namespace impl {
 int32_t omp_vprintf(const char *Format, void *Arguments, uint32_t) {
+  return -1;
+}
+int32_t omp_vfprintf(FILE* stream, const char *Format, void *Arguments, uint32_t Size) {
   return -1;
 }
 } // namespace impl
@@ -58,7 +70,7 @@ int StdInDummyVar;
 int StdOutDummyVar;
 int StdErrDummyVar;
 
-struct FILE;
+
 __attribute__((used, retain, weak, visibility("protected"))) FILE *stdin =
     (FILE *)&StdInDummyVar;
 __attribute__((used, retain, weak, visibility("protected"))) FILE *stdout =
@@ -384,6 +396,10 @@ int memcmp(const void *lhs, const void *rhs, size_t count) {
 /// printf() calls are rewritten by CGGPUBuiltin to __llvm_omp_vprintf
 int32_t __llvm_omp_vprintf(const char *Format, void *Arguments, uint32_t Size) {
   return impl::omp_vprintf(Format, Arguments, Size);
+}
+
+int32_t __llvm_omp_vfprintf(FILE *stream, const char *Format, void *Arguments, uint32_t Size) {
+  return impl::omp_vfprintf(stream, Format, Arguments, Size);
 }
 
 // -----------------------------------------------------------------------------
