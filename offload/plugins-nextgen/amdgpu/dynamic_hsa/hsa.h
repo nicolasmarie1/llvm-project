@@ -165,6 +165,7 @@ hsa_signal_value_t hsa_signal_wait_scacquire(hsa_signal_t signal,
 typedef enum {
   HSA_QUEUE_TYPE_MULTI = 0,
   HSA_QUEUE_TYPE_SINGLE = 1,
+  HSA_QUEUE_TYPE_COOPERATIVE = 2,
 } hsa_queue_type_t;
 
 typedef enum {

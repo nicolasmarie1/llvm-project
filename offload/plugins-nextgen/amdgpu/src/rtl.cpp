@@ -678,7 +678,7 @@ struct AMDGPUQueueTy {
     if (Queue)
       return Plugin::success();
     hsa_status_t Status =
-        hsa_queue_create(Agent, QueueSize, 2 /*HSA_QUEUE_TYPE_MULTI*/, callbackError,
+        hsa_queue_create(Agent, QueueSize, HSA_QUEUE_TYPE_COOPERATIVE /*HSA_QUEUE_TYPE_MULTI*/, callbackError,
                          nullptr, UINT32_MAX, UINT32_MAX, &Queue);
     return Plugin::check(Status, "Error in hsa_queue_create: %s");
   }
