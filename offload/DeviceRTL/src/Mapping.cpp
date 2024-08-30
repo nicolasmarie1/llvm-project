@@ -19,6 +19,10 @@
 
 #include "llvm/Frontend/OpenMP/OMPGridValues.h"
 
+extern "C" {
+  int __omp_rtl_mpi_mode = 0;
+}
+
 using namespace ompx;
 
 namespace ompx {
@@ -292,6 +296,14 @@ uint32_t mapping::getMaxTeamThreads() {
   return mapping::getMaxTeamThreads(mapping::isSPMDMode());
 }
 
+uint32_t mapping::getMaxTeamWarps(bool IsSPMD) {
+  return mapping::getNumberOfWarpsInBlock() - (IsSPMD ? 0 : 1);
+}
+
+uint32_t mapping::getMaxTeamWarps() {
+  return mapping::getMaxTeamWarps(mapping::isSPMDMode());
+}
+
 uint32_t mapping::getNumberOfThreadsInBlock(int32_t Dim) {
   return impl::getNumberOfThreadsInBlock(Dim);
 }
@@ -325,7 +337,10 @@ uint32_t mapping::getNumberOfBlocksInKernel(int32_t Dim) {
 }
 
 uint32_t mapping::getNumberOfProcessorElements() {
-  return static_cast<uint32_t>(config::getHardwareParallelism());
+  if (__omp_rtl_mpi_mode)
+    return mapping::getNumberOfThreadsInBlock() - (!isSPMDMode()) * getWarpSize();
+  else
+    return static_cast<uint32_t>(config::getHardwareParallelism());
 }
 
 ///}

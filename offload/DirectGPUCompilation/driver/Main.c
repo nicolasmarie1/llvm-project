@@ -9,6 +9,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
+#include <omp.h>
+
 extern int __user_main(int, char *[]);
 extern void __kmpc_target_init_allocator(void);
 
@@ -62,6 +65,11 @@ extern void __kmpc_target_init_allocator(void);
 //#pragma omp end declare variant
 //#pragma omp end declare target
 
+#define DEBUG
+
+#pragma omp begin declare target device_type(nohost)
+extern int __omp_rtl_mpi_mode;
+#pragma omp end declare target
 
 int main(int argc, char *argv[]) {
 
@@ -77,24 +85,41 @@ int main(int argc, char *argv[]) {
   if (MPI_Threads != NULL)
     nb_threads = atoi(MPI_Threads);
 
+  int min_size = 64;
+
+  // nb. threads should be a modulo Wave Front/Warp Size
+  nb_threads -= nb_threads % min_size;
+
+#ifdef DEBUG
   printf("Using %d MPI_Ranks and %d MPI_Threads\n", nb_teams, nb_threads);
+#endif
 
 #pragma omp target enter data map(to: argv[:argc])
 
   for (int I = 0; I < argc; ++I) {
-#pragma omp target enter data map(to: argv[I][:strlen(argv[I])])
+#pragma omp target enter data map(to: argv[I][:strlen(argv[I]) + 1])
   }
 
   int Ret = 0;
 #pragma omp target enter data map(to: Ret)
 
-#pragma omp target teams num_teams(1) thread_limit(1)
+#pragma omp target teams num_teams(1) thread_limit(nb_threads)
   {
     __kmpc_target_init_allocator();
   }
 
 #pragma omp target teams num_teams(nb_teams) thread_limit(nb_threads)
   {
+#ifdef DEBUG
+    if (omp_get_team_num() == 0) {
+      printf("NB PROCS: %d / NB MAX THREADS BLOCK: %d\n", omp_get_num_procs(), omp_get_num_procs() / (1024 / 64));
+      #pragma omp parallel
+      #pragma omp single
+      printf("OMP TEAMS: %d / OMP THREADS: %d\n", omp_get_num_teams(), omp_get_num_threads());
+    }
+#endif
+
+    __omp_rtl_mpi_mode = 1; // tell omp to lie about hardware config
     Ret = __user_main(argc, argv);
   }
 

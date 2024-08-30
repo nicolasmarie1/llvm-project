@@ -102,6 +102,10 @@ uint32_t getNumberOfThreadsInKernel();
 uint32_t getMaxTeamThreads();
 uint32_t getMaxTeamThreads(bool IsSPMD);
 
+// Similar as above, use by memory allocator
+uint32_t getMaxTeamWarps();
+uint32_t getMaxTeamWarps(bool IsSPMD);
+
 /// Return the number of processing elements on the device.
 uint32_t getNumberOfProcessorElements();
 

@@ -72,4 +72,4 @@ tolower
 strcasecmp
 
 MPI_*
-
+__omp_rtl_mpi_mode
